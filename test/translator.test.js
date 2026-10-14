@@ -1209,3 +1209,80 @@ test("collectTranslatableItems respects MAX_TEXT_NODES cap", () => {
   const items = core.collectTranslatableItems(container, [], () => true);
   assert.ok(items.length <= 10000, `items.length (${items.length}) should not exceed 10000`);
 });
+
+test("manifest.json declares Libre Local Translator and storage permission", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const manifestPath = path.resolve(process.cwd(), "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+
+  assert.equal(manifest.name, "Libre Local Translator");
+  assert.ok(manifest.permissions.includes("storage"), "manifest must include storage permission");
+});
+
+test("core and background export Libre aliases", () => {
+  assert.equal(globalThis.__libreLocalTranslatorCore, globalThis.__heliumLocalTranslatorCore);
+  assert.equal(globalThis.__libreBackground, globalThis.__heliumBackground);
+});
+
+test("Hardware Acceleration & Tuning: translateItems accepts custom batch size and threads", async () => {
+  const root = new MockDOMNode(1, "DIV");
+  root.isRoot = true;
+
+  const p1 = new MockDOMNode(1, "P");
+  p1.appendChild(new MockDOMNode(3, "#text", "Sentence one for tuning"));
+  const p2 = new MockDOMNode(1, "P");
+  p2.appendChild(new MockDOMNode(3, "#text", "Sentence two for tuning"));
+  const p3 = new MockDOMNode(1, "P");
+  p3.appendChild(new MockDOMNode(3, "#text", "Sentence three for tuning"));
+
+  root.appendChild(p1);
+  root.appendChild(p2);
+  root.appendChild(p3);
+
+  const items = core.collectTranslatableItems(root, [], () => true);
+  assert.equal(items.length, 3);
+
+  // Run with custom GPU / High Concurrency settings
+  const result = await core.translateItems(items, {
+    settings: {
+      preset: "gpu-docker",
+      threads: 8,
+      batchSize: 100
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.translatedCount, 3);
+  assert.equal(core.state.settings.preset, "gpu-docker");
+  assert.equal(core.state.settings.threads, 8);
+  assert.equal(core.state.settings.batchSize, 100);
+
+  // Restore originals
+  await core.restoreOriginals();
+  assert.equal(p1.childNodes[0].nodeValue, "Sentence one for tuning");
+});
+
+test("Hardware Acceleration & Tuning: translatePage accepts settings and applies them", async () => {
+  const doc = globalThis.document;
+  doc.body = new MockDOMNode(1, "BODY");
+  doc.body.isRoot = true;
+
+  const p = new MockDOMNode(1, "P");
+  p.appendChild(new MockDOMNode(3, "#text", "Page sentence to translate"));
+  doc.body.appendChild(p);
+
+  const res = await core.translatePage({
+    preset: "cpu-tuned",
+    threads: 8,
+    batchSize: 100
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(core.state.settings.preset, "cpu-tuned");
+  assert.equal(core.state.settings.threads, 8);
+  assert.equal(core.state.settings.batchSize, 100);
+
+  await core.restoreOriginals();
+  assert.equal(p.childNodes[0].nodeValue, "Page sentence to translate");
+});

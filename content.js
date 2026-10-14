@@ -9,7 +9,8 @@
     isApplyingTranslation: false,
     observerActive: false,
     processedNodes: new WeakSet(),
-    processedAttributes: new WeakMap()
+    processedAttributes: new WeakMap(),
+    settings: null
   });
 
   if (state.installed) return;
@@ -18,6 +19,16 @@
   const BATCH_SIZE = 40;
   const MAX_CONCURRENT_BATCHES = Math.min(6, Math.max(2, (navigator.hardwareConcurrency || 4) - 1));
   const MAX_TEXT_NODES = 10000;
+
+  if (typeof chrome !== "undefined" && chrome?.storage?.local?.get) {
+    try {
+      chrome.storage.local.get(["translatorSettings"], (data) => {
+        if (data?.translatorSettings) {
+          state.settings = data.translatorSettings;
+        }
+      });
+    } catch {}
+  }
 
   const SKIP_TAGS = new Set([
     "SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "SELECT", "OPTION",
@@ -513,6 +524,13 @@
 
   async function translateItems(items, options = {}) {
     const { isDynamic = false } = options;
+    if (options.settings) {
+      state.settings = options.settings;
+    }
+    const tuning = options.settings || state.settings;
+    const activeBatchSize = Math.max(1, Math.min(500, Number(tuning?.batchSize) || BATCH_SIZE));
+    const activeThreads = Math.max(1, Math.min(32, Number(tuning?.threads) || MAX_CONCURRENT_BATCHES));
+
     if (!items.length) {
       return { ok: false, error: "No translatable page text was found." };
     }
@@ -539,8 +557,8 @@
     );
 
     const batches = [];
-    for (let offset = 0; offset < groups.length; offset += BATCH_SIZE) {
-      batches.push(groups.slice(offset, offset + BATCH_SIZE));
+    for (let offset = 0; offset < groups.length; offset += activeBatchSize) {
+      batches.push(groups.slice(offset, offset + activeBatchSize));
     }
 
     let nextBatchIndex = 0;
@@ -673,7 +691,7 @@
       }
     }
 
-    const workerCount = Math.min(MAX_CONCURRENT_BATCHES, batches.length);
+    const workerCount = Math.min(activeThreads, batches.length);
     await Promise.all(Array.from({ length: workerCount }, () => processBatches()));
 
     if (signal?.aborted) {
@@ -881,7 +899,10 @@
     return { ok: true, restored: restored || count };
   }
 
-  async function translatePage() {
+  async function translatePage(customSettings = null) {
+    if (customSettings) {
+      state.settings = customSettings;
+    }
     if (state.busy) return { ok: false, error: "A translation is already running." };
 
     if (state.originals.size > 0) {
@@ -905,7 +926,7 @@
 
       startMutationObserver();
 
-      const result = await translateItems(items);
+      const result = await translateItems(items, { isDynamic: false, settings: state.settings });
       return result;
     } finally {
       state.busy = false;
@@ -916,7 +937,7 @@
   if (typeof chrome !== "undefined" && chrome?.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message?.action === "translatePage") {
-        sendResponseAsync(sendResponse, translatePage());
+        sendResponseAsync(sendResponse, translatePage(message.settings));
         return true;
       }
       if (message?.action === "restoreOriginals") {
@@ -962,4 +983,5 @@
     BLOCK_TAGS,
     TRANSLATABLE_ATTRIBUTES
   };
+  globalThis.__libreLocalTranslatorCore = globalThis.__heliumLocalTranslatorCore;
 })();

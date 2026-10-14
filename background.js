@@ -172,3 +172,4 @@ globalThis.__heliumBackground = {
   requestTranslation,
   translateBatch
 };
+globalThis.__libreBackground = globalThis.__heliumBackground;

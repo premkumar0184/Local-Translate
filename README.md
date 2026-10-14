@@ -1,8 +1,8 @@
-# Local Page Translator
+# Libre Local Translator
 
 <div align="center">
 
-![Local Page Translator](screenshot.png)
+![Libre Local Translator](screenshot.png)
 
 **High-performance, 100% private, on-device webpage translation for Chromium browsers powered by a local LibreTranslate engine.**
 
@@ -10,9 +10,9 @@
 [![Tested on Chromium](https://img.shields.io/badge/Chromium-All%20Browsers-success.svg)](#part-2-browser-installation-guide)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local%20%7C%20Zero%20Telemetry-brightgreen.svg)](#privacy--security-guarantee)
-[![Tests Passing](https://img.shields.io/badge/Tests-34%2F34%20Passing-brightgreen.svg)](#automated-test-suite)
+[![Tests Passing](https://img.shields.io/badge/Tests-38%2F38%20Passing-brightgreen.svg)](#automated-test-suite)
 
-[Features](#key-features) • [Engine Deep Dive](#deep-dive-advanced-engine-capabilities) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Tests (34 Passing)](#automated-test-suite) • [Troubleshooting](#part-4-troubleshooting--faq)
+[Features](#key-features) • [Engine Deep Dive](#deep-dive-advanced-engine-capabilities) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Tests (38 Passing)](#automated-test-suite) • [Troubleshooting](#part-4-troubleshooting--faq)
 
 </div>
 
@@ -25,7 +25,7 @@
 <a id="key-features"></a>
 ## Why Local Translator?
 
-Most web page translators route every word of every site you visit through external corporate cloud APIs (Google, Microsoft, DeepL). **Helium Local Page Translator** runs entirely on your local machine:
+Most web page translators route every word of every site you visit through external corporate cloud APIs (Google, Microsoft, DeepL). **Libre Local Translator** runs entirely on your local machine:
 
 - **100% Private & Air-Gapped Capable**: All translation models run locally at `http://127.0.0.1:5000`. Zero network traffic leaves your computer. No accounts, no API tokens, no tracking.
 - **Inline Element Sentence Stitching**: Solves sentence fragmentation across inline formatting tags (`<a>`, `<span>`, `<strong>`, `<em>`, `<code>`, `<img>`, etc.) using synthetic `<x id="...">` placeholders and AST-aware DOM reconstruction, preserving natural syntax and cross-language word reordering.
@@ -105,7 +105,7 @@ curl -s http://127.0.0.1:5000/languages | grep '"code":"en"'
 
 ## Deep Dive: Advanced Engine Capabilities
 
-Helium Local Page Translator goes beyond naive text-node replacement by incorporating a production-grade DOM translation engine built for modern, complex web applications.
+Libre Local Translator goes beyond naive text-node replacement by incorporating a production-grade DOM translation engine built for modern, complex web applications.
 
 ### 1. Inline Element Sentence Stitching
 
@@ -126,7 +126,7 @@ Sending these fragments individually to a neural machine translation engine prod
 - **Word Order Distortion**: Different languages follow different syntactic structures (e.g., Subject-Verb-Object vs. Subject-Object-Verb). In German, Japanese, Hindi, or Turkish, adjectives, verbs, and prepositional phrases routinely shift positions. Translating isolated fragments makes it impossible to reorder words naturally, rendering the output scrambled or nonsensical.
 
 #### Synthetic Placeholder Masking (`<x id="...">`)
-To solve sentence fragmentation, Helium implements an AST-aware run partitioner:
+To solve sentence fragmentation, Libre Local Translator implements an AST-aware run partitioner:
 1. **Contiguous Run Partitioning**: `collectTranslatableItems` partitions sibling child nodes within block elements (`<p>`, `<div>`, `<li>`, etc.) into continuous runs of text and inline formatting tags (`INLINE_TAGS`: `<a>`, `<span>`, `<strong>`, `<em>`, `<code>`, `<b>`, `<i>`, `<u>`, `<small>`, `<sub>`, `<sup>`, `<abbr>`, `<time>`, `<img>`, etc.). Block-level tags (`<div>`, `<p>`, `<h1>`–`<h6>`, `<br>`) act as natural sentence boundaries and trigger segment flushes.
 2. **Synthetic XML Tokenization**: `maskSegment` serializes the run into a single unified sentence, replacing inline elements with lightweight, unique synthetic XML tags:
    - Elements with content: `<x id="0">terms of service</x>`
@@ -163,13 +163,13 @@ Modern web applications built with React, Vue, Angular, Svelte, Next.js, or Nuxt
 - Modals, tooltips, dialogs, and expandable accordions injected on demand.
 
 #### Debounced Tree Observation
-Helium runs an automatic, background `MutationObserver` on `document.body` or `document.documentElement`:
+Libre Local Translator runs an automatic, background `MutationObserver` on `document.body` or `document.documentElement`:
 - **Subtree Monitoring**: Listens for `{ childList: true, subtree: true }` events.
 - **250ms Coalescing Debounce**: Dynamic insertions typically arrive in rapid bursts (e.g., rendering a 20-item feed). A 250ms debounce coalesces all incoming elements into a single batch, minimizing network requests and background worker wakeups.
 
 #### Infinite Loop & Self-Mutation Prevention
-Translators that observe the DOM are notoriously prone to infinite mutation loops (the translator modifies a node, which triggers the observer, which translates again, forever freezing the browser tab). Helium employs a 3-layer safety architecture:
-1. **Active Translation Suppression Flag (`isApplyingTranslation`)**: When Helium modifies text nodes, updates attributes, or swaps stitched segments, `isApplyingTranslation` is set to `true`. Any mutations triggered during this window are immediately discarded by the observer callback.
+Translators that observe the DOM are notoriously prone to infinite mutation loops (the translator modifies a node, which triggers the observer, which translates again, forever freezing the browser tab). Libre Local Translator employs a 3-layer safety architecture:
+1. **Active Translation Suppression Flag (`isApplyingTranslation`)**: When Libre Local Translator modifies text nodes, updates attributes, or swaps stitched segments, `isApplyingTranslation` is set to `true`. Any mutations triggered during this window are immediately discarded by the observer callback.
 2. **Buffer Flush (`takeRecords()`)**: Immediately following DOM mutation operations, `mutationObserver.takeRecords()` is called to drain and discard any queued mutation events before unsetting the suppression flag.
 3. **WeakSet / WeakMap Processed Tracking**:
    - `state.processedNodes`: A `WeakSet` tracks all DOM text and element nodes that have already been translated.
@@ -187,7 +187,7 @@ Translators that observe the DOM are notoriously prone to infinite mutation loop
 ### 3. Attribute Translation
 
 #### User-Visible Metadata Beyond Text Nodes
-A significant portion of user-facing web text is stored inside HTML attributes rather than DOM text nodes. Helium automatically extracts, deduplicates, translates, and restores four critical attributes:
+A significant portion of user-facing web text is stored inside HTML attributes rather than DOM text nodes. Libre Local Translator automatically extracts, deduplicates, translates, and restores four critical attributes:
 
 | Attribute | Target Elements | Purpose |
 | :--- | :--- | :--- |
@@ -197,7 +197,7 @@ A significant portion of user-facing web text is stored inside HTML attributes r
 | `aria-label` | Any interactive / accessible element | Accessibility labels for screen readers and UI buttons |
 
 #### Two-Way Property Binding
-For form inputs and textareas, modern JavaScript frameworks and browser engines differentiate between HTML attributes and IDL DOM properties. Helium synchronizes both:
+For form inputs and textareas, modern JavaScript frameworks and browser engines differentiate between HTML attributes and IDL DOM properties. Libre Local Translator synchronizes both:
 ```javascript
 // Updates both the HTML attribute and the live DOM property
 entry.element.setAttribute(entry.attribute, translatedVal);
@@ -216,14 +216,14 @@ This guarantees that UI inputs render the translated placeholder immediately, ev
 ## Repository Structure
 
 ```
-helium-local-translator/
+libre-local-translator/
 ├── icons/
 │   ├── icon-16.png        # Favicon & extension details badge (16x16)
 │   ├── icon-32.png        # High-DPI Windows / Chromium toolbar icon (32x32)
 │   ├── icon-48.png        # Browser extensions management page (48x48)
 │   └── icon-128.png       # Web Store & high-resolution displays (128x128)
 ├── test/
-│   └── translator.test.js # Standalone Node.js test suite (34 passing unit tests)
+│   └── translator.test.js # Standalone Node.js test suite (38 passing unit tests)
 ├── background.js          # MV3 service worker, LRU cache & request deduplication
 ├── content.js             # High-performance DOM walker, deduplication & batching
 ├── docker-compose.yml     # Out-of-the-box 1-command LibreTranslate deployment
@@ -445,6 +445,18 @@ If your machine is not connected to the internet:
 | **NVIDIA GPU (Python)** | Install CUDA-enabled PyTorch in venv | Automatic CTranslate2 CUDA inference |
 | **Memory Allocation** | ~1.5 GB base RAM + ~200 MB per loaded language model | Smooth operation on machines with 8 GB+ RAM |
 
+#### Extension Hardware Tuning & Presets Menu
+Libre Local Translator includes a built-in **Hardware & Tuning Settings Menu** right inside the extension popup:
+1. Click the **gear icon (⚙)** in the popup header to open the Hardware & Tuning panel.
+2. Select your hardware configuration preset:
+   - **CPU Standard (Default)**: 4 Cores · Batch Limit 40 (balanced daily browsing).
+   - **CPU Multi-Core (Tuned)**: `--threads 8` · Batch Limit 100 (prevents bottlenecking during multi-fragment batches).
+   - **NVIDIA GPU (Docker)**: `--gpus all` · Batch Limit 100 (5x to 15x inference speedup).
+   - **NVIDIA GPU (Python / PyTorch)**: CUDA matrix batching directly in python venv.
+   - **Low Memory Mode (~1.5 GB RAM)**: 2 Cores · Batch Limit 25 (optimized for <= 8 GB RAM machines).
+   - **Custom Configuration**: Specify custom CPU worker threads (2, 4, 8, 16) and batch limits (25, 40, 100, 150).
+3. Settings auto-save instantly to extension storage (`chrome.storage.local`) and immediately calibrate all page translation batches.
+
 #### Running with GPU Acceleration (Docker)
 Ensure you have the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed:
 
@@ -463,7 +475,7 @@ docker run -d \
 
 ## Part 2: Browser Installation Guide
 
-Helium Local Page Translator is built strictly on standard **Chromium Manifest V3** APIs. It works identically on any modern Chromium-based browser across **Linux, macOS, and Windows**.
+Libre Local Translator is built strictly on standard **Chromium Manifest V3** APIs. It works identically on any modern Chromium-based browser across **Linux, macOS, and Windows**.
 
 ### Step 1: Clone or Download the Repository
 
@@ -471,7 +483,7 @@ Save the repository to a permanent directory on your computer:
 
 ```bash
 # Using Git
-git clone https://github.com/premkumar0184/Local-Translate.git ~/Apps/helium-local-translator
+git clone https://github.com/premkumar0184/Local-Translate.git ~/Apps/libre-local-translator
 
 # Or download and extract the ZIP file to:
 # Linux / macOS: ~/Apps/helium-local-translator
@@ -529,7 +541,7 @@ git clone https://github.com/premkumar0184/Local-Translate.git ~/Apps/helium-loc
 ### Step 3: Pin the Extension to Your Toolbar
 
 1. Click the **Extensions icon** (puzzle piece 🧩) next to your browser's address bar.
-2. Find **Helium Local Page Translator**.
+2. Find **Libre Local Translator**.
 3. Click the **Pin icon** 📌 to keep it visible in your toolbar.
 
 ---
@@ -546,7 +558,7 @@ The extension comes with a built-in keyboard shortcut:
 #### Customizing the Shortcut
 To change the shortcut at any time:
 1. Navigate to `chrome://extensions/shortcuts` (or `edge://extensions/shortcuts`, `brave://extensions/shortcuts`).
-2. Scroll to **Helium Local Page Translator**.
+2. Scroll to **Libre Local Translator**.
 3. Click the pencil icon next to **"Translate the current page into English"** and press your desired shortcut keys.
 
 ---
@@ -555,7 +567,7 @@ To change the shortcut at any time:
 
 ```
 ┌───────────────────────────────────────┐
-│ 🌐 Helium Translator   [ Ready · 4ms ]│
+│ 🌐 Libre Translator    [ Ready · 4ms ]│
 │    Local LibreTranslate → English     │
 ├───────────────────────────────────────┤
 │                                       │
@@ -664,7 +676,7 @@ The repository includes a comprehensive standalone Node.js test suite with zero 
 npm test
 ```
 
-### What the Test Suite Verifies (34 Tests):
+### What the Test Suite Verifies (38 Tests):
 
 #### 1. Core String Sanitization & Unicode Heuristics (3 Tests)
 - `splitWhitespace`: Accurate Unicode whitespace extraction, preserving leading and trailing spaces around core translatable text.
@@ -713,6 +725,12 @@ npm test
 - `Contiguous run grouping`: Grouping adjacent inline formatting elements into a single sentence while maintaining block separation.
 - `Block boundary preservation`: Preserving separate blocks across block-level HTML tags.
 - `Manifest V3 Integrity`: Complete validation of `manifest.json` schema, permissions, host permissions, and all 4 extension icons on disk.
+
+#### 8. Hardware Acceleration, Tuning & Presets (4 Tests)
+- `manifest.json Libre Local Translator & storage`: Validates extension name and storage permission.
+- `Core & background Libre aliases`: Ensures backward-compatible aliases for `__libreLocalTranslatorCore` and `__libreBackground`.
+- `Hardware tuning translateItems`: Verifies dynamic batch size (e.g. 100) and worker thread concurrency (e.g. 8).
+- `Hardware tuning translatePage`: Verifies end-to-end hardware profile options propagation and settings persistence.
 
 
 <a id="privacy-security-guarantee"></a>

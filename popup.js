@@ -7,6 +7,19 @@ const serverBadge = document.getElementById("server-badge");
 const serverDot = document.getElementById("server-dot");
 const serverStatusText = document.getElementById("server-status-text");
 
+const settingsToggleBtn = document.getElementById("settings-toggle-btn");
+const settingsPanel = document.getElementById("settings-panel");
+const settingsSavedTag = document.getElementById("settings-saved-tag");
+const settingPreset = document.getElementById("setting-preset");
+const settingThreads = document.getElementById("setting-threads");
+const settingBatchLimit = document.getElementById("setting-batch-limit");
+const tuningBadge = document.getElementById("tuning-badge");
+const tuningImpactText = document.getElementById("tuning-impact-text");
+const tuningConfigCode = document.getElementById("tuning-config-code");
+const tuningMemoryText = document.getElementById("tuning-memory-text");
+const settingsResetBtn = document.getElementById("settings-reset-btn");
+const settingsCloseBtn = document.getElementById("settings-close-btn");
+
 const progressContainer = document.getElementById("progress-container");
 const progressBarFill = document.getElementById("progress-bar-fill");
 const progressLabel = document.getElementById("progress-label");
@@ -17,6 +30,213 @@ const statusMessage = document.getElementById("status-message");
 const statusStats = document.getElementById("status-stats");
 
 let isServerOnline = false;
+
+// Hardware acceleration & tuning configuration presets
+const PRESETS = {
+  "cpu-default": {
+    name: "CPU Standard",
+    badge: "Balanced",
+    threads: 4,
+    batchSize: 40,
+    impact: "Balanced CPU performance for standard browsing.",
+    config: "--threads 4",
+    memory: "~1.5 GB base RAM + ~200 MB per loaded language model"
+  },
+  "cpu-tuned": {
+    name: "CPU Multi-Core",
+    badge: "Multi-Core",
+    threads: 8,
+    batchSize: 100,
+    impact: "Prevents bottle-necking during batch translation requests.",
+    config: "--threads 8 --batch-limit 100",
+    memory: "Smooth operation on machines with 8 GB+ RAM"
+  },
+  "gpu-docker": {
+    name: "NVIDIA GPU (Docker)",
+    badge: "5x-15x GPU",
+    threads: 4,
+    batchSize: 100,
+    impact: "5x to 15x inference speedup on CUDA-capable GPUs.",
+    config: "docker run --gpus all ... --batch-limit 100",
+    memory: "Automatic CTranslate2 CUDA inference via NVIDIA Toolkit"
+  },
+  "gpu-python": {
+    name: "NVIDIA GPU (Python)",
+    badge: "PyTorch CUDA",
+    threads: 4,
+    batchSize: 100,
+    impact: "Automatic CTranslate2 CUDA inference in Python venv.",
+    config: "Install CUDA-enabled PyTorch in venv",
+    memory: "Optimizes matrix throughput directly with CUDA"
+  },
+  "eco-memory": {
+    name: "Low Memory Mode",
+    badge: "Low RAM",
+    threads: 2,
+    batchSize: 25,
+    impact: "Minimizes background memory pressure on budget machines.",
+    config: "--threads 2 --batch-limit 25",
+    memory: "~1.5 GB base RAM (recommended for <= 8 GB RAM)"
+  },
+  "custom": {
+    name: "Custom Tuning",
+    badge: "Custom",
+    threads: 4,
+    batchSize: 40,
+    impact: "Custom user-configured thread concurrency and batch limits.",
+    config: "User-defined configuration",
+    memory: "Dynamic system allocation"
+  }
+};
+
+const DEFAULT_SETTINGS = {
+  preset: "cpu-default",
+  threads: 4,
+  batchSize: 40
+};
+
+let currentSettings = { ...DEFAULT_SETTINGS };
+let saveTimeout = null;
+
+function updateTuningCard() {
+  const presetKey = currentSettings.preset in PRESETS ? currentSettings.preset : "custom";
+  const p = PRESETS[presetKey];
+  if (!p) return;
+
+  if (tuningBadge) tuningBadge.textContent = p.badge;
+  if (tuningImpactText) tuningImpactText.textContent = p.impact;
+  if (tuningConfigCode) {
+    tuningConfigCode.textContent = presetKey === "custom"
+      ? `--threads ${currentSettings.threads} --batch-limit ${currentSettings.batchSize}`
+      : p.config;
+  }
+  if (tuningMemoryText) tuningMemoryText.textContent = p.memory;
+}
+
+function applySettingsToUI() {
+  if (settingPreset) settingPreset.value = currentSettings.preset || "cpu-default";
+  if (settingThreads) settingThreads.value = String(currentSettings.threads || 4);
+  if (settingBatchLimit) settingBatchLimit.value = String(currentSettings.batchSize || 40);
+  updateTuningCard();
+}
+
+function showSavedIndicator() {
+  if (!settingsSavedTag) return;
+  settingsSavedTag.hidden = false;
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    settingsSavedTag.hidden = true;
+  }, 1200);
+}
+
+async function saveSettings() {
+  try {
+    if (typeof chrome !== "undefined" && chrome?.storage?.local?.set) {
+      await chrome.storage.local.set({ translatorSettings: currentSettings });
+    }
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("libreTranslatorSettings", JSON.stringify(currentSettings));
+    }
+    showSavedIndicator();
+  } catch (err) {
+    console.warn("Could not save settings:", err);
+  }
+}
+
+async function loadSettings() {
+  try {
+    if (typeof chrome !== "undefined" && chrome?.storage?.local?.get) {
+      const data = await chrome.storage.local.get(["translatorSettings"]);
+      if (data?.translatorSettings) {
+        currentSettings = { ...DEFAULT_SETTINGS, ...data.translatorSettings };
+      }
+    } else if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("libreTranslatorSettings");
+      if (saved) {
+        currentSettings = { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+      }
+    }
+  } catch {
+    currentSettings = { ...DEFAULT_SETTINGS };
+  }
+  applySettingsToUI();
+}
+
+function checkIfPresetMatchesCustom() {
+  let matched = "custom";
+  for (const [key, val] of Object.entries(PRESETS)) {
+    if (key !== "custom" && val.threads === currentSettings.threads && val.batchSize === currentSettings.batchSize) {
+      if (currentSettings.preset === key) {
+        matched = key;
+        break;
+      }
+      if (matched === "custom") matched = key;
+    }
+  }
+  currentSettings.preset = matched;
+  if (settingPreset) settingPreset.value = matched;
+}
+
+function toggleSettings(force) {
+  if (!settingsPanel) return;
+  const shouldOpen = typeof force === "boolean" ? force : settingsPanel.hidden;
+  settingsPanel.hidden = !shouldOpen;
+  if (settingsToggleBtn) {
+    settingsToggleBtn.classList.toggle("active", shouldOpen);
+    settingsToggleBtn.setAttribute("aria-expanded", String(shouldOpen));
+  }
+}
+
+if (settingsToggleBtn) {
+  settingsToggleBtn.addEventListener("click", () => toggleSettings());
+}
+
+if (settingsCloseBtn) {
+  settingsCloseBtn.addEventListener("click", () => toggleSettings(false));
+}
+
+if (settingsResetBtn) {
+  settingsResetBtn.addEventListener("click", () => {
+    currentSettings = { ...DEFAULT_SETTINGS };
+    applySettingsToUI();
+    saveSettings();
+  });
+}
+
+if (settingPreset) {
+  settingPreset.addEventListener("change", () => {
+    const selected = settingPreset.value;
+    if (selected !== "custom" && PRESETS[selected]) {
+      currentSettings.preset = selected;
+      currentSettings.threads = PRESETS[selected].threads;
+      currentSettings.batchSize = PRESETS[selected].batchSize;
+      if (settingThreads) settingThreads.value = String(currentSettings.threads);
+      if (settingBatchLimit) settingBatchLimit.value = String(currentSettings.batchSize);
+    } else {
+      currentSettings.preset = "custom";
+    }
+    updateTuningCard();
+    saveSettings();
+  });
+}
+
+if (settingThreads) {
+  settingThreads.addEventListener("change", () => {
+    currentSettings.threads = parseInt(settingThreads.value, 10) || 4;
+    checkIfPresetMatchesCustom();
+    updateTuningCard();
+    saveSettings();
+  });
+}
+
+if (settingBatchLimit) {
+  settingBatchLimit.addEventListener("change", () => {
+    currentSettings.batchSize = parseInt(settingBatchLimit.value, 10) || 40;
+    checkIfPresetMatchesCustom();
+    updateTuningCard();
+    saveSettings();
+  });
+}
 
 function setStatus(message, state = "idle", stats = []) {
   statusPanel.className = `status-panel panel-${state}`;
@@ -51,10 +271,10 @@ async function getActiveTab() {
   return tab;
 }
 
-async function sendToPage(action) {
+async function sendToPage(action, payload = {}) {
   const tab = await getActiveTab();
   await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
-  return chrome.tabs.sendMessage(tab.id, { action });
+  return chrome.tabs.sendMessage(tab.id, { action, ...payload });
 }
 
 async function checkServer() {
@@ -180,7 +400,7 @@ translateButton.addEventListener("click", async () => {
 
   const startTime = performance.now();
   try {
-    const result = await sendToPage("translatePage");
+    const result = await sendToPage("translatePage", { settings: currentSettings });
     const duration = ((performance.now() - startTime) / 1000).toFixed(1);
 
     if (result?.ok) {
@@ -271,6 +491,7 @@ chrome.runtime.onMessage.addListener((message) => {
     const shortcutMod = document.getElementById("shortcut-mod");
     if (shortcutMod) shortcutMod.textContent = "Option";
   }
+  await loadSettings();
   const online = await checkServer();
   if (online) {
     await syncPageState();

@@ -1,5 +1,5 @@
 {
-  "name": "helium-local-translator",
+  "name": "libre-local-translator",
   "version": "0.3.1",
   "description": "High-performance Chromium Manifest V3 extension for translating webpages to English using a local LibreTranslate server.",
   "private": true,

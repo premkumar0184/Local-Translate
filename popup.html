@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Helium Page Translator</title>
+  <title>Libre Local Translator</title>
   <link rel="icon" type="image/png" href="icons/icon-32.png">
   <link rel="stylesheet" href="popup.css">
 </head>
@@ -23,15 +23,100 @@
           </svg>
         </div>
         <div class="brand-text">
-          <h1 class="title">Helium Translator</h1>
+          <h1 class="title">Libre Translator</h1>
           <p class="subtitle">Local LibreTranslate → English</p>
         </div>
       </div>
-      <button id="server-badge" class="server-badge" type="button" aria-label="Recheck server status" title="Click to recheck server status">
-        <span class="status-dot dot-checking" id="server-dot" aria-hidden="true"></span>
-        <span id="server-status-text" class="server-text">Checking…</span>
-      </button>
+      <div class="header-controls">
+        <button id="server-badge" class="server-badge" type="button" aria-label="Recheck server status" title="Click to recheck server status">
+          <span class="status-dot dot-checking" id="server-dot" aria-hidden="true"></span>
+          <span id="server-status-text" class="server-text">Checking…</span>
+        </button>
+        <button id="settings-toggle-btn" class="icon-btn" type="button" aria-label="Hardware Acceleration & Tuning Settings" title="Hardware Acceleration & Tuning Settings" aria-expanded="false">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
     </header>
+
+    <!-- Hardware Acceleration & Tuning Settings Panel -->
+    <section id="settings-panel" class="settings-panel" hidden aria-label="Hardware Acceleration and Tuning">
+      <div class="settings-header">
+        <div class="settings-heading">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          <span class="settings-title">Hardware & Tuning</span>
+        </div>
+        <span id="settings-saved-tag" class="settings-saved-tag" hidden>Saved</span>
+      </div>
+
+      <!-- Hardware Profile Preset Selector -->
+      <div class="setting-field">
+        <label for="setting-preset" class="setting-label">Hardware Profile</label>
+        <div class="select-wrapper">
+          <select id="setting-preset" class="setting-select">
+            <option value="cpu-default">CPU Standard (4 Cores · Batch 40)</option>
+            <option value="cpu-tuned">CPU Multi-Core (--threads 8 · Batch 100)</option>
+            <option value="gpu-docker">NVIDIA GPU (Docker: --gpus all)</option>
+            <option value="gpu-python">NVIDIA GPU (Python / PyTorch CUDA)</option>
+            <option value="eco-memory">Low Memory Mode (~1.5 GB RAM)</option>
+            <option value="custom">Custom Tuning</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Tuning Parameters Row: Threads & Batch Limit -->
+      <div class="setting-row">
+        <div class="setting-field setting-col">
+          <label for="setting-threads" class="setting-label">CPU Threads</label>
+          <div class="select-wrapper">
+            <select id="setting-threads" class="setting-select">
+              <option value="2">2 Cores</option>
+              <option value="4" selected>4 Cores</option>
+              <option value="8">8 Cores</option>
+              <option value="16">16 Cores</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting-field setting-col">
+          <label for="setting-batch-limit" class="setting-label">Batch Limit</label>
+          <div class="select-wrapper">
+            <select id="setting-batch-limit" class="setting-select">
+              <option value="25">25 (Eco)</option>
+              <option value="40" selected>40 (Default)</option>
+              <option value="100">100 (Optimized)</option>
+              <option value="150">150 (Fastest)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dynamic Impact and Configuration Card -->
+      <div class="tuning-card" id="tuning-card">
+        <div class="tuning-impact">
+          <span class="tuning-badge" id="tuning-badge">Tuned</span>
+          <span class="tuning-impact-text" id="tuning-impact-text">Balanced CPU performance for standard browsing.</span>
+        </div>
+        <div class="tuning-detail">
+          <span class="tuning-detail-label">Config:</span>
+          <code class="tuning-code" id="tuning-config-code">--threads 4</code>
+        </div>
+        <div class="tuning-detail">
+          <span class="tuning-detail-label">Memory:</span>
+          <span class="tuning-memory-text" id="tuning-memory-text">~1.5 GB base RAM + ~200 MB per loaded model</span>
+        </div>
+      </div>
+
+      <!-- Settings Panel Actions -->
+      <div class="settings-actions">
+        <button id="settings-reset-btn" class="settings-action-btn" type="button">Reset</button>
+        <button id="settings-close-btn" class="settings-action-btn settings-action-close" type="button">Done</button>
+      </div>
+    </section>
 
     <!-- Main Action Controls -->
     <div class="actions">
