@@ -2269,5 +2269,271 @@ test("Partial Cancellation: aborting after hero batch leaves translated nodes re
   }
 });
 
+test("extractHeroBatch edge cases: handles null/empty, zero viewport items, exactly 5-8 items, and custom limits", () => {
+  // 1. null / undefined / empty
+  assert.deepEqual(core.extractHeroBatch(null), { heroBatch: [], remainingGroups: [] });
+  assert.deepEqual(core.extractHeroBatch(undefined), { heroBatch: [], remainingGroups: [] });
+  assert.deepEqual(core.extractHeroBatch([]), { heroBatch: [], remainingGroups: [] });
+
+  // 2. No viewport items (all Priority 2 or 3)
+  const nonVpGroups = [
+    { core: "p2_a", priority: 2, prominence: 50, domOrder: 0 },
+    { core: "p3_b", priority: 3, prominence: 40, domOrder: 1 }
+  ];
+  const nonVpRes = core.extractHeroBatch(nonVpGroups, 8);
+  assert.equal(nonVpRes.heroBatch.length, 0);
+  assert.equal(nonVpRes.remainingGroups.length, 2);
+
+  // 3. Exactly 5 viewport items
+  const fiveVp = [
+    { core: "v1", priority: 1, prominence: 100, domOrder: 0 },
+    { core: "v2", priority: 1, prominence: 90, domOrder: 1 },
+    { core: "v3", priority: 1, prominence: 80, domOrder: 2 },
+    { core: "v4", priority: 1, prominence: 70, domOrder: 3 },
+    { core: "v5", priority: 1, prominence: 60, domOrder: 4 }
+  ];
+  const fiveRes = core.extractHeroBatch(fiveVp, 8);
+  assert.equal(fiveRes.heroBatch.length, 5);
+  assert.equal(fiveRes.remainingGroups.length, 0);
+
+  // 4. Exactly 8 viewport items
+  const eightVp = Array.from({ length: 8 }, (_, i) => ({
+    core: `v${i}`,
+    priority: 1,
+    prominence: 100 - i * 5,
+    domOrder: i
+  }));
+  const eightRes = core.extractHeroBatch(eightVp, 8);
+  assert.equal(eightRes.heroBatch.length, 8);
+  assert.equal(eightRes.remainingGroups.length, 0);
+
+  // 5. 12 viewport items with default maxHero=8
+  const twelveVp = Array.from({ length: 12 }, (_, i) => ({
+    core: `v${i}`,
+    priority: 1,
+    prominence: 100 - i * 5,
+    domOrder: i
+  }));
+  const twelveRes = core.extractHeroBatch(twelveVp, 8);
+  assert.equal(twelveRes.heroBatch.length, 8);
+  assert.equal(twelveRes.remainingGroups.length, 4);
+  assert.equal(twelveRes.heroBatch[0].core, "v0");
+  assert.equal(twelveRes.remainingGroups[0].core, "v8");
+
+  // 6. Custom maxHero limit = 3
+  const customLimitRes = core.extractHeroBatch(twelveVp, 3);
+  assert.equal(customLimitRes.heroBatch.length, 3);
+  assert.equal(customLimitRes.remainingGroups.length, 9);
+});
+
+test("ActivePriorityQueue IntersectionObserver & Dequeue: observes segment parent elements and unobserves on dequeue", () => {
+  const originalObserver = globalThis.IntersectionObserver;
+  const originalWindow = globalThis.window;
+
+  const observedElements = new Set();
+  const unobservedElements = new Set();
+  let disconnected = false;
+
+  class MockIntersectionObserver {
+    constructor(callback, options) {
+      this.callback = callback;
+      this.options = options;
+    }
+    observe(el) {
+      observedElements.add(el);
+    }
+    unobserve(el) {
+      unobservedElements.add(el);
+    }
+    disconnect() {
+      disconnected = true;
+    }
+  }
+
+  globalThis.IntersectionObserver = MockIntersectionObserver;
+  globalThis.window = {
+    ...originalWindow,
+    innerHeight: 1000,
+    innerWidth: 1000,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+
+  try {
+    const textParent = new MockDOMNode(1, "DIV");
+    textParent.getBoundingClientRect = () => ({ top: 100, bottom: 200, left: 0, right: 500, width: 500, height: 100 });
+    const textChild = new MockDOMNode(3, "#text", "Text child");
+    textParent.appendChild(textChild);
+
+    const segmentParent = new MockDOMNode(1, "P");
+    segmentParent.getBoundingClientRect = () => ({ top: 300, bottom: 400, left: 0, right: 500, width: 500, height: 100 });
+    const segmentSpan = new MockDOMNode(1, "SPAN");
+    segmentParent.appendChild(segmentSpan);
+
+    const gText = {
+      core: "text_item",
+      priority: 1,
+      prominence: 50,
+      domOrder: 0,
+      entries: [{ type: "text", node: textChild, element: textParent }]
+    };
+
+    const gSegment = {
+      core: "segment_item",
+      priority: 1,
+      prominence: 70,
+      domOrder: 1,
+      entries: [{ type: "segment", parent: segmentParent, nodes: [segmentSpan] }]
+    };
+
+    const queue = new core.ActivePriorityQueue([gText, gSegment]);
+    queue.attachListeners();
+
+    // Verify both text element and segment parent element are observed
+    assert.equal(observedElements.has(textParent), true, "Text element parent must be observed");
+    assert.equal(observedElements.has(segmentParent), true, "Segment parent element must be observed");
+
+    // Dequeue batch of 1
+    const dequeued = queue.dequeueBatch(1);
+    assert.equal(dequeued.length, 1);
+    const dequeuedEl = dequeued[0].entries[0].element || dequeued[0].entries[0].parent;
+    assert.equal(unobservedElements.has(dequeuedEl), true, "Dequeued element must be unobserved");
+
+    // Detach listeners
+    queue.detachListeners();
+    assert.equal(disconnected, true, "Observer must be disconnected on detachListeners");
+  } finally {
+    globalThis.IntersectionObserver = originalObserver;
+    globalThis.window = originalWindow;
+  }
+});
+
+test("ActivePriorityQueue Bidirectional Scrolling: promotes elements on scroll down and restores on scroll back up", () => {
+  const topEl = new MockDOMNode(1, "DIV");
+  topEl.getBoundingClientRect = () => ({ top: 50, bottom: 150, left: 0, right: 500, width: 500, height: 100 });
+  const gTop = { core: "top_item", priority: 1, prominence: 80, domOrder: 0, entries: [{ element: topEl }] };
+
+  const bottomEl = new MockDOMNode(1, "DIV");
+  bottomEl.getBoundingClientRect = () => ({ top: 3000, bottom: 3100, left: 0, right: 500, width: 500, height: 100 });
+  const gBottom = { core: "bottom_item", priority: 3, prominence: 80, domOrder: 1, entries: [{ element: bottomEl }] };
+
+  const queue = new core.ActivePriorityQueue([gTop, gBottom]);
+  assert.equal(queue.pending[0].core, "top_item");
+  assert.equal(queue.pending[1].core, "bottom_item");
+
+  // Step 1: User scrolls down 2900px
+  bottomEl.getBoundingClientRect = () => ({ top: 100, bottom: 200, left: 0, right: 500, width: 500, height: 100 });
+  topEl.getBoundingClientRect = () => ({ top: -2850, bottom: -2750, left: 0, right: 500, width: 500, height: 100 });
+  queue.reprioritize();
+
+  assert.equal(queue.pending[0].core, "bottom_item", "Bottom item should jump to front of queue after scroll down");
+  assert.equal(gBottom.priority, 1);
+  assert.equal(gTop.priority, 3);
+
+  // Step 2: User scrolls back up to the top
+  bottomEl.getBoundingClientRect = () => ({ top: 3000, bottom: 3100, left: 0, right: 500, width: 500, height: 100 });
+  topEl.getBoundingClientRect = () => ({ top: 50, bottom: 150, left: 0, right: 500, width: 500, height: 100 });
+  queue.reprioritize();
+
+  assert.equal(queue.pending[0].core, "top_item", "Top item should return to front of queue after scrolling back up");
+  assert.equal(gTop.priority, 1);
+  assert.equal(gBottom.priority, 3);
+
+  queue.detachListeners();
+});
+
+test("Container Scroll Capture: scroll events attach with capture option", () => {
+  const originalWindow = globalThis.window;
+  const attachedListeners = [];
+  const removedListeners = [];
+
+  globalThis.window = {
+    ...originalWindow,
+    addEventListener: (type, fn, opts) => {
+      attachedListeners.push({ type, fn, opts });
+    },
+    removeEventListener: (type, fn, opts) => {
+      removedListeners.push({ type, fn, opts });
+    }
+  };
+
+  try {
+    const queue = new core.ActivePriorityQueue([]);
+    queue.attachListeners();
+
+    const scrollAttach = attachedListeners.find((l) => l.type === "scroll");
+    assert.ok(scrollAttach, "Scroll listener must be attached");
+    assert.equal(scrollAttach.opts?.capture, true, "Scroll listener must use capture: true");
+    assert.equal(scrollAttach.opts?.passive, true, "Scroll listener must use passive: true");
+
+    queue.detachListeners();
+    const scrollRemove = removedListeners.find((l) => l.type === "scroll");
+    assert.ok(scrollRemove, "Scroll listener must be removed");
+    assert.equal(scrollRemove.opts?.capture, true, "Scroll removeEventListener must match capture: true");
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("Staged Concurrency Partial Failure: subsequent batch failure preserves hero translations and allows clean restore", async () => {
+  const root = new MockDOMNode(1, "DIV");
+  root.isRoot = true;
+
+  const h1 = new MockDOMNode(1, "H1");
+  h1.getBoundingClientRect = () => ({ top: 10, bottom: 50, left: 0, right: 500, width: 500, height: 40 });
+  const tHero = new MockDOMNode(3, "#text", "Hero Main Title");
+  h1.appendChild(tHero);
+
+  const pDeep = new MockDOMNode(1, "P");
+  pDeep.getBoundingClientRect = () => ({ top: 3000, bottom: 3100, left: 0, right: 500, width: 500, height: 100 });
+  const tDeep = new MockDOMNode(3, "#text", "Deep Offscreen Paragraph");
+  pDeep.appendChild(tDeep);
+
+  root.appendChild(h1);
+  root.appendChild(pDeep);
+
+  const items = core.collectTranslatableItems(root);
+
+  const originalSendMessage = globalThis.chrome.runtime.sendMessage;
+  let batchNum = 0;
+
+  globalThis.chrome.runtime.sendMessage = async (msg) => {
+    if (msg.action === "translateBatch") {
+      batchNum++;
+      if (batchNum === 1) {
+        // Hero batch succeeds
+        return { ok: true, translations: ["EN:Hero Main Title"] };
+      }
+      // Staged batch 2 fails
+      return { ok: false, error: "Local inference worker crash (OOM)" };
+    }
+    return { ok: true };
+  };
+
+  try {
+    core.state.busy = false;
+    core.state.originals.clear();
+
+    const res = await core.translateItems(items, { settings: { batchSize: 1 } });
+    assert.equal(res.ok, false);
+    assert.equal(res.partial, true);
+    assert.equal(res.translatedCount, 1);
+    assert.equal(res.error, "Local inference worker crash (OOM)");
+
+    // Hero item is translated and visible to the user
+    assert.equal(tHero.nodeValue, "EN:Hero Main Title");
+    assert.equal(tDeep.nodeValue, "Deep Offscreen Paragraph");
+
+    // Clean restore works without leaving corrupted state
+    await core.restoreOriginals();
+    assert.equal(tHero.nodeValue, "Hero Main Title");
+    assert.equal(tDeep.nodeValue, "Deep Offscreen Paragraph");
+    assert.equal(core.state.originals.size, 0);
+  } finally {
+    globalThis.chrome.runtime.sendMessage = originalSendMessage;
+  }
+});
+
+
 
 

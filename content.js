@@ -117,8 +117,8 @@
     if (typeof el.getBoundingClientRect !== "function") return 3;
     try {
       const r = el.getBoundingClientRect();
-      const winH = winHeight || (typeof window !== "undefined" ? window.innerHeight : 1000);
-      const winW = winWidth || (typeof window !== "undefined" ? window.innerWidth : 1000);
+      const winH = winHeight || (typeof window !== "undefined" && window.innerHeight > 0 ? window.innerHeight : 1000);
+      const winW = winWidth || (typeof window !== "undefined" && window.innerWidth > 0 ? window.innerWidth : 1000);
 
       // Priority 1: Elements currently in active viewport
       if (r.bottom > 0 && r.top < winH && r.right > 0 && r.left < winW) {
@@ -174,8 +174,9 @@
     if (typeof el.getBoundingClientRect === "function") {
       try {
         const r = el.getBoundingClientRect();
-        if (r.top >= 0 && r.top < 1000) {
-          const posBonus = Math.max(0, 20 - Math.floor(r.top / 40));
+        if (r.top < 1000 && r.bottom > 0) {
+          const effectiveTop = Math.max(0, r.top);
+          const posBonus = Math.max(0, 20 - Math.floor(effectiveTop / 40));
           score += posBonus;
         }
       } catch {}
@@ -658,8 +659,8 @@
     constructor(groups = [], options = {}) {
       this.signal = options.signal || null;
       this.priorityFn = options.priorityFn || null;
-      this.winHeight = typeof window !== "undefined" ? window.innerHeight : 1000;
-      this.winWidth = typeof window !== "undefined" ? window.innerWidth : 1000;
+      this.winHeight = typeof window !== "undefined" && window.innerHeight > 0 ? window.innerHeight : 1000;
+      this.winWidth = typeof window !== "undefined" && window.innerWidth > 0 ? window.innerWidth : 1000;
 
       this.pending = [...groups];
       this.observer = null;
@@ -694,8 +695,8 @@
 
     reprioritize() {
       if (!this.pending.length) return;
-      const winH = typeof window !== "undefined" ? window.innerHeight : this.winHeight;
-      const winW = typeof window !== "undefined" ? window.innerWidth : this.winWidth;
+      const winH = typeof window !== "undefined" && window.innerHeight > 0 ? window.innerHeight : this.winHeight;
+      const winW = typeof window !== "undefined" && window.innerWidth > 0 ? window.innerWidth : this.winWidth;
 
       let changed = false;
       for (const group of this.pending) {
@@ -732,7 +733,20 @@
 
     dequeueBatch(batchSize) {
       if (!this.pending.length) return [];
-      return this.pending.splice(0, batchSize);
+      const batch = this.pending.splice(0, batchSize);
+      if (this.observer && typeof this.observer.unobserve === "function") {
+        for (const group of batch) {
+          for (const entry of group.entries) {
+            const el = entry.element || (entry.node?.nodeType === 1 ? entry.node : (entry.node?.parentElement || entry.node?.parentNode)) || entry.parent;
+            if (el && el.nodeType === 1) {
+              try {
+                this.observer.unobserve(el);
+              } catch {}
+            }
+          }
+        }
+      }
+      return batch;
     }
 
     attachListeners() {
@@ -755,8 +769,8 @@
             }, 30);
           }
         };
-        window.addEventListener("scroll", this.scrollListener, { passive: true });
-        window.addEventListener("resize", this.scrollListener, { passive: true });
+        window.addEventListener("scroll", this.scrollListener, { passive: true, capture: true });
+        window.addEventListener("resize", this.scrollListener, { passive: true, capture: true });
       }
 
       if (typeof IntersectionObserver !== "undefined") {
@@ -777,10 +791,12 @@
             threshold: 0
           });
 
+          const observedElements = new Set();
           for (const group of this.pending) {
             for (const entry of group.entries) {
-              const el = entry.element || (entry.node?.nodeType === 1 ? entry.node : (entry.node?.parentElement || entry.node?.parentNode));
-              if (el && el.nodeType === 1 && typeof this.observer.observe === "function") {
+              const el = entry.element || (entry.node?.nodeType === 1 ? entry.node : (entry.node?.parentElement || entry.node?.parentNode)) || entry.parent;
+              if (el && el.nodeType === 1 && !observedElements.has(el) && typeof this.observer.observe === "function") {
+                observedElements.add(el);
                 this.observer.observe(el);
               }
             }
@@ -792,8 +808,8 @@
     detachListeners() {
       this.isListening = false;
       if (this.scrollListener && typeof window !== "undefined" && typeof window.removeEventListener === "function") {
-        window.removeEventListener("scroll", this.scrollListener);
-        window.removeEventListener("resize", this.scrollListener);
+        window.removeEventListener("scroll", this.scrollListener, { capture: true });
+        window.removeEventListener("resize", this.scrollListener, { capture: true });
         this.scrollListener = null;
       }
       if (this.observer) {
