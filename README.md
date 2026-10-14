@@ -80,7 +80,7 @@ curl -s http://127.0.0.1:5000/languages | grep '"code":"en"'
 │  - Text sanitization & whitespace preservation                         │
 │  - In-page phrase deduplication (unique string groups)                 │
 │  - Viewport-first priority queue & zero-width marker DOM replacement   │
-│  - Full original state map (nodes, attributes, segment hierarchies)   │
+│  - Full original state map (nodes, attributes, segment hierarchies)    │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │ chrome.runtime.sendMessage
                                    │ { action: "translateBatch", format: "html" }
@@ -471,7 +471,7 @@ Save the repository to a permanent directory on your computer:
 
 ```bash
 # Using Git
-git clone https://github.com/<your-username>/helium-local-translator.git ~/Apps/helium-local-translator
+git clone https://github.com/premkumar0184/Local-Translate.git ~/Apps/helium-local-translator
 
 # Or download and extract the ZIP file to:
 # Linux / macOS: ~/Apps/helium-local-translator
@@ -584,8 +584,8 @@ To change the shortcut at any time:
 4. **Cancel Running Translation**:
    - If a translation is running, the secondary button changes to **Cancel**. Clicking it immediately aborts remaining server requests and rolls back modified nodes safely.
 
----
-
+<a id="part-4-troubleshooting-faq"></a>
+<a id="part-4-troubleshooting--faq"></a>
 ## Part 4: Troubleshooting & FAQ
 
 ### 1. macOS: Port 5000 is occupied / "Cannot reach LibreTranslate"
@@ -715,6 +715,8 @@ npm test
 - `Manifest V3 Integrity`: Complete validation of `manifest.json` schema, permissions, host permissions, and all 4 extension icons on disk.
 
 
+<a id="privacy-security-guarantee"></a>
+<a id="privacy--security-guarantee"></a>
 ## Privacy & Security Guarantee
 
 - **Zero Cloud Network Calls**: Network requests are exclusively restricted to `http://127.0.0.1:5000/*` via Manifest V3 host permissions.
