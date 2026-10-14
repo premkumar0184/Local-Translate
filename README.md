@@ -556,30 +556,6 @@ npm test
 - `Extension Icons`: Verification that all 4 icon sizes (16, 32, 48, 128) exist on disk with valid PNG headers.
 - `Live LibreTranslate Server`: Real-time connectivity and translation validation if local engine is online.
 
----
-
-## Part 6: Git & Publishing to GitHub
-
-To publish this project to your GitHub account:
-
-```bash
-# 1. Initialize git repository (if not already done)
-git init -b main
-
-# 2. Add all files
-git add .
-
-# 3. Create your initial commit
-git commit -m "feat: initial commit of Helium Local Page Translator v0.3.1"
-
-# 4. Add your GitHub remote repository URL
-git remote add origin https://github.com/<your-username>/helium-local-translator.git
-
-# 5. Push to GitHub
-git push -u origin main
-```
-
----
 
 ## Privacy & Security Guarantee
 
