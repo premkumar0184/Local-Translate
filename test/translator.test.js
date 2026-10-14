@@ -503,7 +503,9 @@ test("manifest.json has valid Manifest V3 structure and complete icons", async (
   assert.ok(manifest.name);
   assert.ok(manifest.version);
   assert.ok(manifest.permissions.includes("activeTab"));
+  assert.ok(manifest.permissions.includes("contextMenus"));
   assert.ok(manifest.permissions.includes("scripting"));
+  assert.ok(manifest.permissions.includes("storage"));
   assert.ok(manifest.host_permissions.includes("http://127.0.0.1:5000/*"));
   assert.equal(manifest.background.service_worker, "background.js");
   assert.equal(manifest.action.default_popup, "popup.html");
@@ -628,6 +630,10 @@ class MockDOMNode {
 }
 
 // Global browser environment setup for content.js and background.js
+let installedListener = null;
+let contextMenuClickListener = null;
+let commandListener = null;
+
 globalThis.chrome = {
   runtime: {
     sendMessage: async (msg) => {
@@ -641,9 +647,31 @@ globalThis.chrome = {
       }
       return { ok: true };
     },
-    onMessage: { addListener: () => {} }
+    onMessage: { addListener: () => {} },
+    onInstalled: {
+      addListener: (fn) => {
+        installedListener = fn;
+      }
+    }
   },
-  commands: { onCommand: { addListener: () => {} } }
+  contextMenus: {
+    create: (props, cb) => {
+      globalThis.__lastCreatedContextMenu = props;
+      if (typeof cb === "function") cb();
+    },
+    onClicked: {
+      addListener: (fn) => {
+        contextMenuClickListener = fn;
+      }
+    }
+  },
+  commands: {
+    onCommand: {
+      addListener: (fn) => {
+        commandListener = fn;
+      }
+    }
+  }
 };
 globalThis.document = {
   body: new MockDOMNode(1, "BODY"),
@@ -1364,3 +1392,271 @@ test("Hardware Acceleration: translatePage falls back to chrome.storage.local if
     globalThis.chrome = originalChrome;
   }
 });
+
+test("manifest.json includes contextMenus permission in permissions array", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const manifestPath = path.resolve(process.cwd(), "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+
+  assert.ok(Array.isArray(manifest.permissions), "permissions must be an array");
+  assert.ok(manifest.permissions.includes("contextMenus"), "manifest.json permissions must include 'contextMenus'");
+});
+
+test("background.js registers context menu onInstalled with correct id, title, and contexts", () => {
+  assert.ok(typeof installedListener === "function", "chrome.runtime.onInstalled listener must be registered");
+  assert.equal(bg.CONTEXT_MENU_ID, "translate-to-english");
+
+  let createdMenu = null;
+  const originalContextMenus = globalThis.chrome.contextMenus;
+  globalThis.chrome.contextMenus = {
+    ...originalContextMenus,
+    create: (props, cb) => {
+      createdMenu = props;
+      if (typeof cb === "function") cb();
+    }
+  };
+
+  try {
+    bg.setupContextMenu();
+    assert.ok(createdMenu, "chrome.contextMenus.create must be called");
+    assert.equal(createdMenu.id, "translate-to-english");
+    assert.equal(createdMenu.title, "Translate to English");
+    assert.deepEqual(createdMenu.contexts, ["page", "selection"]);
+
+    createdMenu = null;
+    installedListener();
+    assert.ok(createdMenu, "invoking onInstalled listener must trigger menu creation");
+    assert.equal(createdMenu.id, "translate-to-english");
+    assert.equal(createdMenu.title, "Translate to English");
+    assert.deepEqual(createdMenu.contexts, ["page", "selection"]);
+  } finally {
+    globalThis.chrome.contextMenus = originalContextMenus;
+  }
+});
+
+test("background.js contextMenus.onClicked triggers translatePage on target tab with stored settings", async () => {
+  assert.ok(typeof contextMenuClickListener === "function", "chrome.contextMenus.onClicked listener must be registered");
+
+  const originalChrome = globalThis.chrome;
+  let executedScripts = [];
+  let sentMessages = [];
+
+  globalThis.chrome = {
+    ...originalChrome,
+    scripting: {
+      executeScript: async (params) => {
+        executedScripts.push(params);
+        return [{ result: true }];
+      }
+    },
+    tabs: {
+      sendMessage: async (tabId, msg) => {
+        sentMessages.push({ tabId, msg });
+        return { ok: true, translatedCount: 10 };
+      },
+      query: async () => [{ id: 42, url: "https://example.com" }]
+    },
+    storage: {
+      local: {
+        get: async (keys) => {
+          if (keys.includes("translatorSettings")) {
+            return {
+              translatorSettings: {
+                preset: "gpu-docker",
+                threads: 8,
+                batchSize: 100
+              }
+            };
+          }
+          return {};
+        }
+      }
+    }
+  };
+
+  try {
+    const clickInfo = { menuItemId: "translate-to-english" };
+    const mockTab = { id: 77, url: "https://example.org/article" };
+
+    const result = await contextMenuClickListener(clickInfo, mockTab);
+    assert.deepEqual(result, { ok: true, translatedCount: 10 });
+
+    assert.equal(executedScripts.length, 1);
+    assert.deepEqual(executedScripts[0], {
+      target: { tabId: 77 },
+      files: ["content.js"]
+    });
+
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].tabId, 77);
+    assert.equal(sentMessages[0].msg.action, "translatePage");
+    assert.deepEqual(sentMessages[0].msg.settings, {
+      preset: "gpu-docker",
+      threads: 8,
+      batchSize: 100
+    });
+
+    // Fallback when tab is null (queries active tab)
+    executedScripts = [];
+    sentMessages = [];
+    await bg.handleContextMenuClick(clickInfo, null);
+
+    assert.equal(executedScripts.length, 1);
+    assert.equal(executedScripts[0].target.tabId, 42);
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].tabId, 42);
+    assert.equal(sentMessages[0].msg.action, "translatePage");
+
+    // Click event with unrelated menuItemId should be ignored
+    executedScripts = [];
+    sentMessages = [];
+    const ignoreResult = await contextMenuClickListener({ menuItemId: "some-other-action" }, mockTab);
+    assert.equal(ignoreResult, null);
+    assert.equal(executedScripts.length, 0);
+    assert.equal(sentMessages.length, 0);
+  } finally {
+    globalThis.chrome = originalChrome;
+  }
+});
+
+test("background.js command listener reuses translateTab workflow with stored settings", async () => {
+  assert.ok(typeof commandListener === "function", "chrome.commands.onCommand listener must be registered");
+
+  const originalChrome = globalThis.chrome;
+  let executedScripts = [];
+  let sentMessages = [];
+
+  globalThis.chrome = {
+    ...originalChrome,
+    scripting: {
+      executeScript: async (params) => {
+        executedScripts.push(params);
+        return [{ result: true }];
+      }
+    },
+    tabs: {
+      query: async (queryInfo) => {
+        assert.equal(queryInfo.active, true);
+        assert.equal(queryInfo.lastFocusedWindow, true);
+        return [{ id: 88, url: "https://example.com/blog" }];
+      },
+      sendMessage: async (tabId, msg) => {
+        sentMessages.push({ tabId, msg });
+        return { ok: true };
+      }
+    },
+    storage: {
+      local: {
+        get: async () => ({
+          translatorSettings: { preset: "cpu-tuned", threads: 8, batchSize: 100 }
+        })
+      }
+    }
+  };
+
+  try {
+    await commandListener("translate-page");
+    assert.equal(executedScripts.length, 1);
+    assert.equal(executedScripts[0].target.tabId, 88);
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].tabId, 88);
+    assert.equal(sentMessages[0].msg.action, "translatePage");
+    assert.deepEqual(sentMessages[0].msg.settings, {
+      preset: "cpu-tuned",
+      threads: 8,
+      batchSize: 100
+    });
+
+    executedScripts = [];
+    sentMessages = [];
+    await commandListener("unknown-command");
+    assert.equal(executedScripts.length, 0);
+    assert.equal(sentMessages.length, 0);
+  } finally {
+    globalThis.chrome = originalChrome;
+  }
+});
+
+test("background.js translateTab handles missing tab, storage errors, and injection errors gracefully", async () => {
+  const originalChrome = globalThis.chrome;
+
+  // 1. Missing tab
+  globalThis.chrome = {
+    ...originalChrome,
+    tabs: { query: async () => [] }
+  };
+  const noTabResult = await bg.translateTab();
+  assert.equal(noTabResult, null);
+
+  // 2. Storage empty (no settings)
+  let sentMsg = null;
+  globalThis.chrome = {
+    ...originalChrome,
+    tabs: {
+      query: async () => [{ id: 99 }],
+      sendMessage: async (tabId, msg) => {
+        sentMsg = msg;
+        return { ok: true };
+      }
+    },
+    scripting: { executeScript: async () => {} },
+    storage: { local: { get: async () => ({}) } }
+  };
+  await bg.translateTab({ id: 99 });
+  assert.equal(sentMsg.action, "translatePage");
+  assert.equal(sentMsg.settings, undefined);
+
+  // 3. Injection error caught gracefully
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    globalThis.chrome = {
+      ...originalChrome,
+      tabs: { query: async () => [{ id: 99 }] },
+      scripting: {
+        executeScript: async () => {
+          throw new Error("Cannot access a chrome:// URL");
+        }
+      }
+    };
+    const errResult = await bg.translateTab({ id: 99 });
+    assert.equal(errResult, null);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  globalThis.chrome = originalChrome;
+});
+
+test("Context menu translation respects existing cancellation and busy state in content script", async () => {
+  const doc = globalThis.document;
+  doc.body = new MockDOMNode(1, "BODY");
+  doc.body.isRoot = true;
+
+  const p = new MockDOMNode(1, "P");
+  p.appendChild(new MockDOMNode(3, "#text", "Original text before right click"));
+  doc.body.appendChild(p);
+
+  core.state.busy = true;
+
+  const busyRes = await core.translatePage();
+  assert.equal(busyRes.ok, false);
+  assert.equal(busyRes.error, "A translation is already running.");
+
+  core.state.busy = false;
+  const transRes = await core.translatePage();
+  assert.equal(transRes.ok, true);
+  assert.equal(p.childNodes[0].nodeValue, "EN:Original text before right click");
+  assert.equal(core.state.originals.size, 1);
+
+  // Re-invoking translatePage (as right-clicking would) automatically restores previous originals first
+  const reTransRes = await core.translatePage();
+  assert.equal(reTransRes.ok, true);
+  assert.equal(p.childNodes[0].nodeValue, "EN:Original text before right click");
+
+  await core.restoreOriginals();
+  assert.equal(p.childNodes[0].nodeValue, "Original text before right click");
+  assert.equal(core.state.originals.size, 0);
+});
+

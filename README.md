@@ -10,9 +10,9 @@
 [![Tested on Chromium](https://img.shields.io/badge/Chromium-All%20Browsers-success.svg)](#part-2-browser-installation-guide)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local%20%7C%20Zero%20Telemetry-brightgreen.svg)](#privacy--security-guarantee)
-[![Tests Passing](https://img.shields.io/badge/Tests-40%2F40%20Passing-brightgreen.svg)](#automated-test-suite)
+[![Tests Passing](https://img.shields.io/badge/Tests-46%2F46%20Passing-brightgreen.svg)](#automated-test-suite)
 
-[Features](#key-features) • [Engine Deep Dive](#deep-dive-advanced-engine-capabilities) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Tests (40 Passing)](#automated-test-suite) • [Troubleshooting](#part-4-troubleshooting--faq)
+[Features](#key-features) • [Engine Deep Dive](#deep-dive-advanced-engine-capabilities) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Tests (46 Passing)](#automated-test-suite) • [Troubleshooting](#part-4-troubleshooting--faq)
 
 </div>
 
@@ -588,7 +588,7 @@ To change the shortcut at any time:
    - Open the popup. The status badge in the top right will show `Ready · Xms` with a green indicator.
    - If offline, click the badge at any time to re-check connectivity.
 2. **Translate Page**:
-   - Click **Translate to English** or press `Alt + Shift + W`.
+   - Click **Translate to English**, press `Alt + Shift + W`, or right-click anywhere on the page or selected text and choose **Translate to English**.
    - The visible viewport will translate first, followed by background sections.
    - The animated progress bar shows processed unique phrases and total DOM nodes.
 3. **Restore Original Content**:
@@ -676,7 +676,7 @@ The repository includes a comprehensive standalone Node.js test suite with zero 
 npm test
 ```
 
-### What the Test Suite Verifies (40 Tests):
+### What the Test Suite Verifies (46 Tests):
 
 #### 1. Core String Sanitization & Unicode Heuristics (3 Tests)
 - `splitWhitespace`: Accurate Unicode whitespace extraction, preserving leading and trailing spaces around core translatable text.
@@ -733,6 +733,14 @@ npm test
 - `Hardware tuning translatePage`: Verifies end-to-end hardware profile options propagation and settings persistence.
 - `Branding consistency across files`: Verifies "Libre Local Translator" naming across `manifest.json`, `package.json`, `popup.html`, and `README.md`.
 - `Hardware storage fallback`: Verifies asynchronous fallback loading from `chrome.storage.local` when no payload is passed to `translatePage`.
+
+#### 9. Native Context Menu & Permissions (6 Tests)
+- `manifest.json contextMenus permission`: Verifies `contextMenus` permission is declared in `manifest.json`.
+- `Context menu registration`: Verifies `chrome.runtime.onInstalled` registers "Translate to English" with id `translate-to-english` and contexts `["page", "selection"]`.
+- `Context menu click handling`: Verifies `chrome.contextMenus.onClicked` triggers `translatePage` workflow on the active tab with saved hardware tuning settings.
+- `Shortcut workflow reuse`: Verifies `chrome.commands.onCommand` shares the unified `translateTab` workflow.
+- `Error isolation & missing tabs`: Handles missing tabs, uninjectable restricted pages, and storage errors without unhandled exceptions.
+- `Cancellation & busy state respect`: Ensures right-click triggers properly respect existing active translation state and previous translation restorations.
 
 
 <a id="privacy-security-guarantee"></a>

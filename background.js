@@ -148,28 +148,108 @@ if (typeof chrome !== "undefined" && chrome?.runtime?.onMessage) {
   });
 }
 
+const CONTEXT_MENU_ID = "translate-to-english";
+
+function setupContextMenu() {
+  if (typeof chrome === "undefined" || !chrome?.contextMenus?.create) return;
+  try {
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_ID,
+      title: "Translate to English",
+      contexts: ["page", "selection"]
+    }, () => {
+      if (chrome.runtime?.lastError) {
+        // Suppress unchecked runtime.lastError if item already exists upon reload
+      }
+    });
+  } catch (err) {
+    console.warn("Could not register context menu:", err);
+  }
+}
+
+async function getStoredSettings() {
+  if (typeof chrome !== "undefined" && chrome?.storage?.local?.get) {
+    try {
+      const data = await chrome.storage.local.get(["translatorSettings"]);
+      return data?.translatorSettings || null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function getTargetTab(tab) {
+  if (tab?.id) return tab;
+  if (typeof chrome !== "undefined" && chrome?.tabs?.query) {
+    const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    return activeTab || null;
+  }
+  return null;
+}
+
+async function translateTab(targetTab = null) {
+  try {
+    const tab = await getTargetTab(targetTab);
+    if (!tab?.id) return null;
+
+    if (typeof chrome !== "undefined" && chrome?.scripting?.executeScript) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["content.js"]
+      });
+    }
+
+    const settings = await getStoredSettings();
+    if (typeof chrome !== "undefined" && chrome?.tabs?.sendMessage) {
+      const payload = { action: "translatePage" };
+      if (settings) {
+        payload.settings = settings;
+      }
+      return await chrome.tabs.sendMessage(tab.id, payload);
+    }
+  } catch (error) {
+    console.warn("Could not translate this tab:", error);
+    return null;
+  }
+}
+
+async function handleContextMenuClick(info, tab) {
+  if (info?.menuItemId !== CONTEXT_MENU_ID) return null;
+  return await translateTab(tab);
+}
+
+if (typeof chrome !== "undefined" && chrome?.runtime?.onInstalled) {
+  chrome.runtime.onInstalled.addListener(setupContextMenu);
+}
+
+if (typeof chrome !== "undefined" && chrome?.contextMenus?.onClicked) {
+  chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
+}
+
 if (typeof chrome !== "undefined" && chrome?.commands?.onCommand) {
   chrome.commands.onCommand.addListener(async (command) => {
     if (command !== "translate-page") return;
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      if (!tab?.id) return;
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
-      await chrome.tabs.sendMessage(tab.id, { action: "translatePage" });
-    } catch (error) {
-      console.warn("Could not translate this tab:", error);
-    }
+    await translateTab();
   });
 }
 
 globalThis.__heliumBackground = {
   API_BASE,
   CACHE_MAX,
+  CONTEXT_MENU_ID,
   translationCache,
   inFlight,
   getCached,
   setCache,
   requestTranslation,
-  translateBatch
+  translateBatch,
+  getStoredSettings,
+  getTargetTab,
+  translateTab,
+  translateActiveTab: translateTab,
+  setupContextMenu,
+  handleContextMenuClick
 };
 globalThis.__libreBackground = globalThis.__heliumBackground;
+
