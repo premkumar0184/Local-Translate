@@ -1304,6 +1304,14 @@ test("Branding consistency: manifest, package, popup, and README declare Libre L
   assert.ok(popupHtml.includes("<title>Libre Local Translator</title>"));
   assert.ok(popupHtml.includes('<h1 class="title">Libre Local Translator</h1>'));
 
+  // popup.css typography craft floor (minimum 12px)
+  const popupCss = fs.readFileSync(path.resolve(process.cwd(), "popup.css"), "utf-8");
+  const fontSizes = [...popupCss.matchAll(/font-size:\s*([\d.]+)px/g)].map((m) => parseFloat(m[1]));
+  assert.ok(fontSizes.length > 0);
+  for (const size of fontSizes) {
+    assert.ok(size >= 12, `Expected font-size >= 12px, found ${size}px`);
+  }
+
   // README.md
   const readme = fs.readFileSync(path.resolve(process.cwd(), "README.md"), "utf-8");
   assert.ok(readme.startsWith("# Libre Local Translator"));
