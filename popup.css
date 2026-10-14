@@ -149,7 +149,7 @@ body {
 
 .subtitle {
   margin: 2px 0 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   line-height: 1.2;
   white-space: nowrap;
@@ -167,7 +167,7 @@ body {
   border: 1px solid var(--border-app);
   border-radius: 9999px;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
   flex-shrink: 0;
@@ -309,12 +309,16 @@ body {
   letter-spacing: -0.01em;
 }
 
+.settings-title {
+  font-size: 12px;
+}
+
 .settings-heading svg {
   color: #ffffff;
 }
 
 .settings-saved-tag {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -342,7 +346,7 @@ body {
 }
 
 .setting-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
   letter-spacing: 0.02em;
@@ -400,7 +404,7 @@ body {
   background: #060608;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -417,7 +421,7 @@ body {
   background: #ffffff;
   color: #000000;
   font-weight: 700;
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
   flex-shrink: 0;
   letter-spacing: -0.01em;
@@ -435,6 +439,7 @@ body {
 }
 
 .tuning-detail-label {
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-tertiary);
   flex-shrink: 0;
@@ -443,7 +448,7 @@ body {
 
 .tuning-code {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 12px;
   color: #ffffff;
   background: #141416;
   border: 1px solid var(--border-app);
@@ -470,7 +475,7 @@ body {
 .settings-action-btn {
   padding: 4px 10px;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-app);
@@ -683,7 +688,7 @@ body {
   gap: 4px;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   background: #141416;
@@ -705,7 +710,7 @@ body {
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -724,7 +729,7 @@ body {
   display: inline-block;
   padding: 1px 5px;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   background: #141416;
@@ -734,12 +739,12 @@ body {
 
 .key-sep {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   user-select: none;
 }
 
 .privacy-note {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-tertiary);
 }
 
