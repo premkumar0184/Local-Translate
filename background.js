@@ -38,7 +38,7 @@ async function requestTranslation(texts) {
     });
   } catch (err) {
     if (err?.name === "TimeoutError") {
-      throw new Error("Translation request timed out (15s). Local LibreTranslate server may be overloaded.");
+      throw new Error("Translation request timed out (150s). Local LibreTranslate server may be overloaded.");
     }
     throw new Error("Cannot reach LibreTranslate at 127.0.0.1:5000. Please ensure the local server is running.");
   }

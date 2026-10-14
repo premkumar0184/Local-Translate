@@ -10,7 +10,7 @@
 [![Tested on Chromium](https://img.shields.io/badge/Chromium-All%20Browsers-success.svg)](#part-2-browser-installation-guide)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local%20%7C%20Zero%20Telemetry-brightgreen.svg)](#privacy--security-guarantee)
-[![Tests Passing](https://img.shields.io/badge/Tests-11%2F11%20Passing-brightgreen.svg)](#automated-test-suite)
+[![Tests Passing](https://img.shields.io/badge/Tests-14%2F14%20Passing-brightgreen.svg)](#automated-test-suite)
 
 [Features](#key-features) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Hardware Tuning](#hardware-acceleration--tuning) • [Troubleshooting](#part-4-troubleshooting--faq)
 
@@ -82,6 +82,33 @@ curl -s http://127.0.0.1:5000/languages | grep '"code":"en"'
 │  - Argos Translate / CTranslate2 local neural machine translation      │
 │  - Multi-threaded CPU or CUDA GPU acceleration                         │
 └────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Repository Structure
+
+```
+helium-local-translator/
+├── icons/
+│   ├── icon-16.png        # Favicon & extension details badge (16x16)
+│   ├── icon-32.png        # High-DPI Windows / Chromium toolbar icon (32x32)
+│   ├── icon-48.png        # Browser extensions management page (48x48)
+│   └── icon-128.png       # Web Store & high-resolution displays (128x128)
+├── test/
+│   └── translator.test.js # Standalone Node.js test suite (14 passing unit tests)
+├── background.js          # MV3 service worker, LRU cache & request deduplication
+├── content.js             # High-performance DOM walker, deduplication & batching
+├── docker-compose.yml     # Out-of-the-box 1-command LibreTranslate deployment
+├── manifest.json          # Chrome Extensions Manifest V3 definition
+├── package.json           # Node package definition & test runner
+├── popup.css              # Dark/light responsive stylesheet
+├── popup.html             # Extension action popup interface
+├── popup.js               # Status checking, tab sync & translation controls
+├── screenshot.png         # High-resolution extension UI screenshot
+├── .gitignore             # Standard git ignore patterns for OS, Node, & Python
+├── LICENSE                # MIT Open-Source License
+└── README.md              # Complete documentation & cross-platform guide
 ```
 
 ---
@@ -210,6 +237,34 @@ If you have `pipx` installed:
 pipx install libretranslate
 libretranslate --host 127.0.0.1 --port 5000 --threads 4 --load-only en,zh,ja,hi,ru,de,fr,es
 ```
+
+---
+
+### Method D: Pre-Built Binaries, Standalone Packages & Snap
+
+For users who want to avoid compiling C/C++ dependencies or managing virtual environments:
+
+#### 1. Pre-Compiled Binary Python Wheels (Zero C++ Compiling)
+Python wheel distributions (`.whl`) contain pre-compiled native CTranslate2 machine learning binaries for x86_64 and ARM64 (Apple Silicon). Force pip to use pre-built binary wheels:
+```bash
+pip install --only-binary :all: libretranslate
+libretranslate --host 127.0.0.1 --port 5000 --threads 4 --load-only en,zh,ja,hi,ru,de,fr,es
+```
+
+#### 2. Linux Snap Standalone Package
+On Ubuntu and distributions with `snapd`, Argos Translate (the core neural translation engine) can be installed as an isolated, pre-built binary sandbox:
+```bash
+sudo snap install argos-translate
+```
+
+#### 3. Pre-Built Container Runtime (Docker)
+Because LibreTranslate relies on machine learning weights and native CTranslate2 matrix libraries, the official Docker container (`libretranslate/libretranslate:latest`) serves as the official pre-built, self-contained binary execution format across Windows, macOS, and Linux. It requires zero compiler tools or system packages:
+```bash
+docker run -d --name libretranslate -p 127.0.0.1:5000:5000 libretranslate/libretranslate:latest --load-only en,zh,ja,hi,ru,de,fr,es
+```
+
+#### 4. Portable Desktop Client (Tauri AppImage / Windows Executable)
+If you prefer a native desktop application interface, LibreTranslate Desktop (built on Tauri + Rust) distributes standalone pre-built `.AppImage` (Linux) and portable executables. Run your local server and connect the desktop app seamlessly to `http://127.0.0.1:5000`.
 
 ---
 
@@ -484,17 +539,22 @@ The repository includes a comprehensive standalone Node.js test suite with zero 
 npm test
 ```
 
-### What the Test Suite Verifies:
+### What the Test Suite Verifies (14 Tests):
 - `splitWhitespace`: Accurate Unicode whitespace extraction and core text separation.
 - `isEligibleText`: Acceptance of CJK logograms, single-letter European words, and rejection of pure numbers/symbols.
 - `shouldRejectElement`: Correct exclusion of code blocks, form inputs, editable fields, and hidden subtrees.
+- `XML & Lowercase Tags`: Robust case-insensitive tag rejection for XHTML/XML elements.
 - `deduplication`: Grouping identical phrases across the DOM and sorting viewport-visible nodes to the front.
 - `TranslationCache`: Correct LRU eviction when cache exceeds limit (`maxSize = 2000`).
 - `translateBatchWithCache`: Efficient caching avoiding repeated network requests.
 - `inFlight Deduplication`: Promise sharing for concurrent identical requests.
 - `Error Isolation`: Mismatched server responses fail cleanly without cache poisoning.
 - `AbortController & Rollback`: Aborting in-flight operations safely reverts DOM nodes.
-- `Batch Chunking`: Proper slicing of unique text groups.
+- `Batch Chunking`: Proper slicing of unique text groups into batch sizes of 40.
+- `isRestrictedUrl`: Safe protection preventing script execution on internal browser pages (`chrome://`, `edge://`, `about:blank`, webstore).
+- `Manifest V3 Integrity`: Complete validation of `manifest.json` schema, permissions, host permissions, and service worker.
+- `Extension Icons`: Verification that all 4 icon sizes (16, 32, 48, 128) exist on disk with valid PNG headers.
+- `Live LibreTranslate Server`: Real-time connectivity and translation validation if local engine is online.
 
 ---
 

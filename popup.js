@@ -84,16 +84,47 @@ async function checkServer() {
     serverDot.className = "status-dot dot-offline";
     serverStatusText.textContent = "Offline";
     translateButton.disabled = true;
-    translateButton.title = "Local LibreTranslate server is offline";
-    setStatus(
-      "Cannot reach LibreTranslate at 127.0.0.1:5000. Start server: sudo docker start libretranslate",
-      "error"
-    );
+    const isModelError = error?.message?.includes("English model");
+    const errorMsg = isModelError
+      ? "English model ('en') is not installed in LibreTranslate. Install with: argospm install translate-..._en"
+      : "Cannot reach LibreTranslate at 127.0.0.1:5000. Start server: docker compose up -d";
+    translateButton.title = isModelError ? "English target model missing" : "Local LibreTranslate server is offline";
+    setStatus(errorMsg, "error");
     return false;
   }
 }
 
+function isRestrictedUrl(url) {
+  if (!url) return true;
+  const restrictedProtocols = [
+    "chrome:", "edge:", "brave:", "opera:", "vivaldi:", "about:",
+    "chrome-extension:", "devtools:", "view-source:", "data:"
+  ];
+  return restrictedProtocols.some((proto) => url.startsWith(proto)) ||
+         url.startsWith("https://chromewebstore.google.com") ||
+         url.startsWith("https://microsoftedge.microsoft.com/addons");
+}
+
 async function syncPageState() {
+  let tab;
+  try {
+    tab = await getActiveTab();
+  } catch {
+    setStatus("No active browser tab found.", "idle");
+    return;
+  }
+
+  if (isRestrictedUrl(tab.url)) {
+    translateButton.disabled = true;
+    translateButton.title = "Internal browser and restricted pages cannot be translated";
+    restoreButton.disabled = true;
+    setStatus(
+      "Restricted page: Browser internal pages (e.g. settings/extensions) cannot be translated. Open any regular website to use.",
+      "idle"
+    );
+    return;
+  }
+
   try {
     const state = await sendToPage("getState");
     if (!state?.ok) return;
@@ -123,7 +154,9 @@ async function syncPageState() {
       setStatus("Local server is ready. Click Translate or press Alt+Shift+W.", "idle");
     }
   } catch {
-    // Restricted or inactive browser tab
+    if (isServerOnline) {
+      setStatus("Local server is ready. Click Translate or press Alt+Shift+W.", "idle");
+    }
   }
 }
 
@@ -234,6 +267,10 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Initialization
 (async () => {
+  if (navigator.platform?.includes("Mac") || navigator.userAgent?.includes("Mac")) {
+    const shortcutMod = document.getElementById("shortcut-mod");
+    if (shortcutMod) shortcutMod.textContent = "Option";
+  }
   const online = await checkServer();
   if (online) {
     await syncPageState();

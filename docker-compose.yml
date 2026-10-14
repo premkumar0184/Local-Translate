@@ -13,9 +13,7 @@ services:
       # Enable batch processing optimizations
       - LT_BATCH_LIMIT=100
     volumes:
-      - lt-local-data:/home/libretranslate/.local
-      - lt-models:/home/libretranslate/.local/share/argos-translate
+      - libretranslate-data:/home/libretranslate/.local
 
 volumes:
-  lt-local-data:
-  lt-models:
+  libretranslate-data:

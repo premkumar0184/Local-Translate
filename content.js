@@ -56,12 +56,13 @@
   }
 
   function shouldRejectElement(node) {
+    const tagName = node.tagName?.toUpperCase();
     return (
-      SKIP_TAGS.has(node.tagName) ||
-      node.hidden ||
-      node.hasAttribute("hidden") ||
-      node.isContentEditable ||
-      node.getAttribute("aria-hidden") === "true"
+      (tagName && SKIP_TAGS.has(tagName)) ||
+      Boolean(node.hidden) ||
+      Boolean(node.hasAttribute?.("hidden")) ||
+      Boolean(node.isContentEditable) ||
+      node.getAttribute?.("aria-hidden") === "true"
     );
   }
 

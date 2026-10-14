@@ -24,8 +24,9 @@ function isEligibleText(text) {
 }
 
 function shouldRejectElement(node) {
+  const tagName = node.tagName?.toUpperCase();
   return (
-    SKIP_TAGS.has(node.tagName) ||
+    (tagName && SKIP_TAGS.has(tagName)) ||
     Boolean(node.hidden) ||
     Boolean(node.hasAttribute?.("hidden")) ||
     Boolean(node.isContentEditable) ||
@@ -453,4 +454,74 @@ test("batch size chunking slices unique groups correctly", () => {
   assert.equal(batches[0].length, 40);
   assert.equal(batches[1].length, 40);
   assert.equal(batches[2].length, 15);
+});
+
+test("shouldRejectElement handles lowercase and XML tag names", () => {
+  assert.equal(shouldRejectElement({ tagName: "script" }), true);
+  assert.equal(shouldRejectElement({ tagName: "style" }), true);
+  assert.equal(shouldRejectElement({ tagName: "code" }), true);
+  assert.equal(shouldRejectElement({ tagName: "p" }), false);
+});
+
+test("isRestrictedUrl correctly identifies protected browser pages", () => {
+  function isRestrictedUrl(url) {
+    if (!url) return true;
+    const restrictedProtocols = [
+      "chrome:", "edge:", "brave:", "opera:", "vivaldi:", "about:",
+      "chrome-extension:", "devtools:", "view-source:", "data:"
+    ];
+    return restrictedProtocols.some((proto) => url.startsWith(proto)) ||
+           url.startsWith("https://chromewebstore.google.com") ||
+           url.startsWith("https://microsoftedge.microsoft.com/addons");
+  }
+
+  // Restricted pages
+  assert.equal(isRestrictedUrl("chrome://extensions"), true);
+  assert.equal(isRestrictedUrl("edge://settings"), true);
+  assert.equal(isRestrictedUrl("brave://rewards"), true);
+  assert.equal(isRestrictedUrl("about:blank"), true);
+  assert.equal(isRestrictedUrl("chrome-extension://xyz/popup.html"), true);
+  assert.equal(isRestrictedUrl("https://chromewebstore.google.com/detail/123"), true);
+  assert.equal(isRestrictedUrl(""), true);
+  assert.equal(isRestrictedUrl(null), true);
+
+  // Normal translatable websites
+  assert.equal(isRestrictedUrl("https://en.wikipedia.org/wiki/Main_Page"), false);
+  assert.equal(isRestrictedUrl("http://localhost:3000"), false);
+  assert.equal(isRestrictedUrl("https://news.ycombinator.com"), false);
+});
+
+test("manifest.json has valid Manifest V3 structure and complete icons", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+
+  const manifestPath = path.resolve(process.cwd(), "manifest.json");
+  assert.ok(fs.existsSync(manifestPath), "manifest.json must exist");
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  assert.equal(manifest.manifest_version, 3);
+  assert.ok(manifest.name);
+  assert.ok(manifest.version);
+  assert.ok(manifest.permissions.includes("activeTab"));
+  assert.ok(manifest.permissions.includes("scripting"));
+  assert.ok(manifest.host_permissions.includes("http://127.0.0.1:5000/*"));
+  assert.equal(manifest.background.service_worker, "background.js");
+  assert.equal(manifest.action.default_popup, "popup.html");
+
+  // Verify all icon declarations
+  assert.ok(manifest.icons);
+  for (const size of ["16", "32", "48", "128"]) {
+    assert.ok(manifest.icons[size], `manifest.icons must declare size ${size}`);
+    assert.ok(manifest.action.default_icon[size], `manifest.action.default_icon must declare size ${size}`);
+
+    const iconFile = path.resolve(process.cwd(), manifest.icons[size]);
+    assert.ok(fs.existsSync(iconFile), `Icon file ${iconFile} must exist on disk`);
+
+    // Verify PNG magic bytes
+    const buf = fs.readFileSync(iconFile);
+    assert.equal(buf[0], 0x89);
+    assert.equal(buf[1], 0x50); // P
+    assert.equal(buf[2], 0x4e); // N
+    assert.equal(buf[3], 0x47); // G
+  }
 });
