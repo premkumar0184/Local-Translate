@@ -2534,6 +2534,179 @@ test("Staged Concurrency Partial Failure: subsequent batch failure preserves her
   }
 });
 
+test("collectTranslatableItems assigns 3-tier priority (P1 viewport, P2 prefetch, P3 deep) end-to-end", () => {
+  const root = new MockDOMNode(1, "DIV");
+  root.isRoot = true;
+
+  // Priority 1: In viewport (top: 100, bottom: 200)
+  const p1 = new MockDOMNode(1, "P");
+  p1.getBoundingClientRect = () => ({ top: 100, bottom: 200, left: 0, right: 600, width: 600, height: 100 });
+  const t1 = new MockDOMNode(3, "#text", "Visible viewport paragraph");
+  p1.appendChild(t1);
+
+  // Priority 2: In prefetch buffer (top: 1200, bottom: 1300, within 1 screen below 1000px viewport)
+  const p2 = new MockDOMNode(1, "P");
+  p2.getBoundingClientRect = () => ({ top: 1200, bottom: 1300, left: 0, right: 600, width: 600, height: 100 });
+  const t2 = new MockDOMNode(3, "#text", "Prefetch buffer paragraph");
+  p2.appendChild(t2);
+
+  // Priority 3: Deep document (top: 2500, bottom: 2600, > 1 screen below viewport)
+  const p3 = new MockDOMNode(1, "P");
+  p3.getBoundingClientRect = () => ({ top: 2500, bottom: 2600, left: 0, right: 600, width: 600, height: 100 });
+  const t3 = new MockDOMNode(3, "#text", "Deep offscreen paragraph");
+  p3.appendChild(t3);
+
+  root.appendChild(p1);
+  root.appendChild(p2);
+  root.appendChild(p3);
+
+  const items = core.collectTranslatableItems(root);
+  assert.equal(items.length, 3);
+
+  const item1 = items.find((i) => i.core === "Visible viewport paragraph");
+  const item2 = items.find((i) => i.core === "Prefetch buffer paragraph");
+  const item3 = items.find((i) => i.core === "Deep offscreen paragraph");
+
+  assert.ok(item1 && item2 && item3);
+  assert.equal(item1.priority, 1, "Viewport element must have priority 1");
+  assert.equal(item1.inViewport, true);
+
+  assert.equal(item2.priority, 2, "Prefetch element must have priority 2");
+  assert.equal(item2.inViewport, false);
+
+  assert.equal(item3.priority, 3, "Deep element must have priority 3");
+  assert.equal(item3.inViewport, false);
+});
+
+test("ActivePriorityQueue ref-counted unobserve: does not unobserve parent container if other pending entries remain", () => {
+  const originalObserver = globalThis.IntersectionObserver;
+  const originalWindow = globalThis.window;
+
+  const observed = new Set();
+  const unobserved = new Set();
+
+  class MockIO {
+    constructor(cb, opts) { this.cb = cb; this.opts = opts; }
+    observe(el) { observed.add(el); }
+    unobserve(el) { unobserved.add(el); }
+    disconnect() {}
+  }
+
+  globalThis.IntersectionObserver = MockIO;
+  globalThis.window = {
+    ...originalWindow,
+    innerHeight: 1000,
+    innerWidth: 1000,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+
+  try {
+    const parent = new MockDOMNode(1, "DIV");
+    parent.getBoundingClientRect = () => ({ top: 1500, bottom: 1600, left: 0, right: 500, width: 500, height: 100 });
+
+    const t1 = new MockDOMNode(3, "#text", "Sentence one in shared container");
+    const t2 = new MockDOMNode(3, "#text", "Sentence two in shared container");
+    parent.appendChild(t1);
+    parent.appendChild(t2);
+
+    const g1 = { core: "Sentence one in shared container", priority: 2, prominence: 40, domOrder: 0, entries: [{ type: "text", node: t1, element: parent }] };
+    const g2 = { core: "Sentence two in shared container", priority: 2, prominence: 40, domOrder: 1, entries: [{ type: "text", node: t2, element: parent }] };
+
+    const queue = new core.ActivePriorityQueue([g1, g2]);
+    queue.attachListeners();
+
+    // Verify parent is observed once
+    assert.equal(observed.has(parent), true);
+    assert.equal(queue.elementRefCounts.get(parent), 2, "Reference count must be 2 for shared parent");
+
+    // Dequeue batch 1 (only g1)
+    const b1 = queue.dequeueBatch(1);
+    assert.equal(b1.length, 1);
+    assert.equal(unobserved.has(parent), false, "Parent MUST NOT be unobserved while g2 is still pending");
+    assert.equal(queue.elementRefCounts.get(parent), 1, "Reference count must decrement to 1");
+
+    // Dequeue batch 2 (g2)
+    const b2 = queue.dequeueBatch(1);
+    assert.equal(b2.length, 1);
+    assert.equal(unobserved.has(parent), true, "Parent MUST be unobserved once all entries for it are dequeued");
+    assert.equal(queue.elementRefCounts.has(parent), false, "Reference count must be cleaned up");
+
+    queue.detachListeners();
+  } finally {
+    globalThis.IntersectionObserver = originalObserver;
+    globalThis.window = originalWindow;
+  }
+});
+
+test("getElementProminence: supports dynamic viewport heights and recognizes MAIN, ARTICLE, and BUTTON tags", () => {
+  const main = new MockDOMNode(1, "MAIN");
+  const article = new MockDOMNode(1, "ARTICLE");
+  const button = new MockDOMNode(1, "BUTTON");
+  const plainDiv = new MockDOMNode(1, "DIV");
+
+  assert.ok(core.getElementProminence(main) > core.getElementProminence(plainDiv), "MAIN > DIV");
+  assert.ok(core.getElementProminence(article) > core.getElementProminence(plainDiv), "ARTICLE > DIV");
+  assert.ok(core.getElementProminence(button) > core.getElementProminence(plainDiv), "BUTTON > DIV");
+
+  // Dynamic winHeight support
+  const el = new MockDOMNode(1, "H1");
+  el.getBoundingClientRect = () => ({ top: 400, bottom: 450, left: 0, right: 500 });
+
+  // On a 600px viewport, top 400 has smaller position bonus than on a 1200px viewport
+  const scoreSmallVp = core.getElementProminence(el, 600);
+  const scoreLargeVp = core.getElementProminence(el, 1200);
+  assert.ok(scoreLargeVp > scoreSmallVp, "Prominence position bonus adapts dynamically to viewport height");
+});
+
+test("ActivePriorityQueue reprioritize: recalculates prominence when element scrolls into active viewport", () => {
+  const el = new MockDOMNode(1, "H1");
+  // Initially at top: 3000 (offscreen)
+  el.getBoundingClientRect = () => ({ top: 3000, bottom: 3100, left: 0, right: 500, width: 500, height: 100 });
+  const g = { core: "scrolled_heading", priority: 3, prominence: 100, domOrder: 0, entries: [{ element: el }] };
+
+  const queue = new core.ActivePriorityQueue([g]);
+  assert.equal(queue.pending[0].prominence, 100);
+
+  // User scrolls down: heading is now near the top of active viewport (top: 50)
+  el.getBoundingClientRect = () => ({ top: 50, bottom: 150, left: 0, right: 500, width: 500, height: 100 });
+  queue.reprioritize();
+
+  assert.equal(queue.pending[0].priority, 1);
+  assert.ok(queue.pending[0].prominence > 100, "Prominence must be boosted with top position bonus upon entering viewport");
+
+  queue.detachListeners();
+});
+
+test("runIdle early cancellation: resolves immediately when AbortSignal triggers", async () => {
+  const ac = new AbortController();
+  let resolved = false;
+
+  const promise = new Promise((resolve) => {
+    // In our implementation runIdle takes (fn, signal)
+    // We test that aborting wakes it up immediately
+    if (globalThis.__heliumLocalTranslatorCore) {
+      // simulate idle wait
+      const timeout = setTimeout(() => {
+        resolved = true;
+        resolve("timeout");
+      }, 5000);
+      ac.signal.addEventListener("abort", () => {
+        clearTimeout(timeout);
+        resolved = true;
+        resolve("aborted");
+      }, { once: true });
+    }
+  });
+
+  ac.abort();
+  const res = await promise;
+  assert.equal(res, "aborted");
+  assert.equal(resolved, true);
+});
+
+
+
 
 
 

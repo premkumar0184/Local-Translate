@@ -56,9 +56,39 @@
 
   const TRANSLATABLE_ATTRIBUTES = ["placeholder", "title", "alt", "aria-label"];
 
-  const runIdle = typeof requestIdleCallback === "function"
-    ? (fn) => requestIdleCallback(fn, { timeout: 500 })
-    : (fn) => setTimeout(fn, 0);
+  const runIdle = (fn, signal) => {
+    if (signal?.aborted) {
+      fn();
+      return;
+    }
+    let handle;
+    let onAbort;
+    if (typeof requestIdleCallback === "function") {
+      handle = requestIdleCallback(() => {
+        if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+        fn();
+      }, { timeout: 500 });
+      if (signal) {
+        onAbort = () => {
+          if (typeof cancelIdleCallback === "function") cancelIdleCallback(handle);
+          fn();
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    } else {
+      handle = setTimeout(() => {
+        if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+        fn();
+      }, 0);
+      if (signal) {
+        onAbort = () => {
+          clearTimeout(handle);
+          fn();
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+  };
 
   function reportProgress(doneUnique, totalUnique, updatedNodes, totalNodes) {
     if (typeof chrome !== "undefined" && chrome?.runtime?.sendMessage) {
@@ -141,7 +171,7 @@
     return getNodePriority(node) === 1;
   }
 
-  function getElementProminence(node) {
+  function getElementProminence(node, winHeight) {
     if (!node) return 0;
     let el = node.nodeType === 1 ? node : (node.parentElement || node.parentNode);
     if (!el) return 0;
@@ -161,6 +191,9 @@
       if (tag === "TITLE") { score = Math.max(score, 95); break; }
       if (tag === "HEADER") { score = Math.max(score, 75); }
       if (tag === "NAV") { score = Math.max(score, 70); }
+      if (tag === "MAIN") { score = Math.max(score, 45); }
+      if (tag === "ARTICLE") { score = Math.max(score, 45); }
+      if (tag === "BUTTON") { score = Math.max(score, 50); }
       if (tag === "P") { score = Math.max(score, 40); }
 
       const role = curr.getAttribute?.("role")?.toLowerCase();
@@ -173,10 +206,11 @@
 
     if (typeof el.getBoundingClientRect === "function") {
       try {
+        const winH = winHeight || (typeof window !== "undefined" && window.innerHeight > 0 ? window.innerHeight : 1000);
         const r = el.getBoundingClientRect();
-        if (r.top < 1000 && r.bottom > 0) {
+        if (r.top < winH && r.bottom > 0) {
           const effectiveTop = Math.max(0, r.top);
-          const posBonus = Math.max(0, 20 - Math.floor(effectiveTop / 40));
+          const posBonus = Math.max(0, 20 - Math.floor((effectiveTop / winH) * 20));
           score += posBonus;
         }
       } catch {}
@@ -417,10 +451,12 @@
 
   // --- Requirement C & A: Translatable Items Collection ---
 
-  function collectTranslatableItems(root, items = [], isNodeInViewportFn = isNodeInViewport) {
+  function collectTranslatableItems(root, items = [], priorityOrViewportFn = getNodePriority) {
     if (!root) return items;
 
     const IGNORED_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
+    const winH = typeof window !== "undefined" && window.innerHeight > 0 ? window.innerHeight : 1000;
+    const winW = typeof window !== "undefined" && window.innerWidth > 0 ? window.innerWidth : 1000;
 
     function isHidden(el) {
       return (
@@ -432,19 +468,23 @@
 
     function getItemPriorityAndProminence(nodeOrEl) {
       let p = 3;
-      if (typeof isNodeInViewportFn === "function") {
-        const res = isNodeInViewportFn(nodeOrEl);
-        if (typeof res === "number") {
-          p = res;
-        } else if (typeof res === "boolean") {
-          p = res ? 1 : 3;
+      if (typeof priorityOrViewportFn === "function") {
+        if (priorityOrViewportFn === isNodeInViewport) {
+          p = getNodePriority(nodeOrEl, winH, winW);
         } else {
-          p = getNodePriority(nodeOrEl);
+          const res = priorityOrViewportFn(nodeOrEl);
+          if (typeof res === "number") {
+            p = res;
+          } else if (typeof res === "boolean") {
+            p = res ? 1 : 3;
+          } else {
+            p = getNodePriority(nodeOrEl, winH, winW);
+          }
         }
       } else {
-        p = getNodePriority(nodeOrEl);
+        p = getNodePriority(nodeOrEl, winH, winW);
       }
-      const prom = getElementProminence(nodeOrEl);
+      const prom = getElementProminence(nodeOrEl, winH);
       return { priority: p, prominence: prom };
     }
 
@@ -667,6 +707,7 @@
       this.scrollListener = null;
       this.isListening = false;
       this.scrollThrottled = false;
+      this.elementRefCounts = new Map();
 
       this.sortQueue();
     }
@@ -702,6 +743,7 @@
       for (const group of this.pending) {
         const oldPriority = group.priority;
         let newPriority = 3;
+        let maxProminence = group.prominence ?? 0;
 
         for (const entry of group.entries) {
           const target = entry.element || entry.node || entry.parent;
@@ -716,12 +758,16 @@
           }
           entry.priority = p;
           if (p < newPriority) newPriority = p;
-          if (newPriority === 1) break;
+          if (p === 1) {
+            const prom = getElementProminence(target, winH);
+            if (prom > maxProminence) maxProminence = prom;
+          }
         }
 
-        if (newPriority !== oldPriority) {
+        if (newPriority !== oldPriority || (newPriority === 1 && maxProminence !== group.prominence)) {
           group.priority = newPriority;
           group.inViewport = newPriority === 1;
+          group.prominence = maxProminence;
           changed = true;
         }
       }
@@ -739,9 +785,21 @@
           for (const entry of group.entries) {
             const el = entry.element || (entry.node?.nodeType === 1 ? entry.node : (entry.node?.parentElement || entry.node?.parentNode)) || entry.parent;
             if (el && el.nodeType === 1) {
-              try {
-                this.observer.unobserve(el);
-              } catch {}
+              if (this.elementRefCounts && this.elementRefCounts.has(el)) {
+                const count = this.elementRefCounts.get(el) - 1;
+                if (count <= 0) {
+                  this.elementRefCounts.delete(el);
+                  try {
+                    this.observer.unobserve(el);
+                  } catch {}
+                } else {
+                  this.elementRefCounts.set(el, count);
+                }
+              } else {
+                try {
+                  this.observer.unobserve(el);
+                } catch {}
+              }
             }
           }
         }
@@ -776,14 +834,7 @@
       if (typeof IntersectionObserver !== "undefined") {
         try {
           this.observer = new IntersectionObserver((entries) => {
-            let hasIntersection = false;
-            for (const entry of entries) {
-              if (entry.isIntersecting) {
-                hasIntersection = true;
-                break;
-              }
-            }
-            if (hasIntersection) {
+            if (entries && entries.length > 0) {
               this.reprioritize();
             }
           }, {
@@ -791,13 +842,16 @@
             threshold: 0
           });
 
-          const observedElements = new Set();
+          this.elementRefCounts = new Map();
           for (const group of this.pending) {
             for (const entry of group.entries) {
               const el = entry.element || (entry.node?.nodeType === 1 ? entry.node : (entry.node?.parentElement || entry.node?.parentNode)) || entry.parent;
-              if (el && el.nodeType === 1 && !observedElements.has(el) && typeof this.observer.observe === "function") {
-                observedElements.add(el);
-                this.observer.observe(el);
+              if (el && el.nodeType === 1) {
+                const count = this.elementRefCounts.get(el) || 0;
+                this.elementRefCounts.set(el, count + 1);
+                if (count === 0 && typeof this.observer.observe === "function") {
+                  this.observer.observe(el);
+                }
               }
             }
           }
@@ -817,6 +871,9 @@
           this.observer.disconnect();
         }
         this.observer = null;
+      }
+      if (this.elementRefCounts) {
+        this.elementRefCounts.clear();
       }
     }
   }
@@ -1041,7 +1098,7 @@
             if (!success) break;
 
             if (batch[0]?.priority === 3 && !signal?.aborted) {
-              await new Promise((resolve) => runIdle(resolve));
+              await new Promise((resolve) => runIdle(resolve, signal));
             }
           }
         }
