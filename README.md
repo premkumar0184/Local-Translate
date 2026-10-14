@@ -18,6 +18,10 @@
 
 ---
 
+
+**Note** : This is tried and tested on Arch linux, it might not work properly on other OS, feel free to try it and raise issues or contribute yourself if you can.
+
+
 ## Why Helium Local Translator?
 
 Most web page translators route every word of every site you visit through external corporate cloud APIs (Google, Microsoft, DeepL). **Helium Local Page Translator** runs entirely on your local machine:
