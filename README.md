@@ -10,9 +10,9 @@
 [![Tested on Chromium](https://img.shields.io/badge/Chromium-All%20Browsers-success.svg)](#part-2-browser-installation-guide)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local%20%7C%20Zero%20Telemetry-brightgreen.svg)](#privacy--security-guarantee)
-[![Tests Passing](https://img.shields.io/badge/Tests-14%2F14%20Passing-brightgreen.svg)](#automated-test-suite)
+[![Tests Passing](https://img.shields.io/badge/Tests-34%2F34%20Passing-brightgreen.svg)](#automated-test-suite)
 
-[Features](#key-features) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Hardware Tuning](#hardware-acceleration--tuning) • [Troubleshooting](#part-4-troubleshooting--faq)
+[Features](#key-features) • [Engine Deep Dive](#deep-dive-advanced-engine-capabilities) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Tests (34 Passing)](#automated-test-suite) • [Troubleshooting](#part-4-troubleshooting--faq)
 
 </div>
 
@@ -22,16 +22,20 @@
 **Note** : This is tried and tested on Arch linux, it might not work properly on other OS, feel free to try it and raise issues or contribute yourself if you can.
 
 
-## Why Helium Local Translator?
+<a id="key-features"></a>
+## Why Local Translator?
 
 Most web page translators route every word of every site you visit through external corporate cloud APIs (Google, Microsoft, DeepL). **Helium Local Page Translator** runs entirely on your local machine:
 
 - **100% Private & Air-Gapped Capable**: All translation models run locally at `http://127.0.0.1:5000`. Zero network traffic leaves your computer. No accounts, no API tokens, no tracking.
-- **Smart DOM Walker & Subtree Pruning**: Uses `NodeFilter.FILTER_REJECT` to skip entire non-translatable DOM subtrees (`<script>`, `<style>`, `<code>`, `<pre>`, `<svg>`, hidden containers) in a single step rather than walking thousands of irrelevant elements.
+- **Inline Element Sentence Stitching**: Solves sentence fragmentation across inline formatting tags (`<a>`, `<span>`, `<strong>`, `<em>`, `<code>`, `<img>`, etc.) using synthetic `<x id="...">` placeholders and AST-aware DOM reconstruction, preserving natural syntax and cross-language word reordering.
+- **Dynamic Content & SPA MutationObserver**: Debounced `MutationObserver` automatically detects dynamically rendered content (React, Vue, Next.js, infinite scroll feeds, client-side routing) and queues newly injected subtrees with zero self-mutation infinite loops.
+- **Attribute Translation**: Automatically extracts and translates user-visible text in `placeholder` (inputs & textareas), `title` tooltips, `alt` text on images, and `aria-label` accessibility descriptors.
+- **Smart DOM Walker & Subtree Pruning**: Uses `NodeFilter.FILTER_REJECT` to skip entire non-translatable DOM subtrees (`<script>`, `<style>`, `<code>` blocks, `<pre>`, `<svg>`, hidden containers) in a single step rather than walking thousands of irrelevant elements.
 - **In-Page Phrase Deduplication**: Groups repeated phrases (menus, footers, buttons, recurring terms). Only unique phrases are sent for translation, and all matching DOM nodes are updated simultaneously. Reduces model inference load and latency by **30% to 60%**.
 - **Viewport-First Prioritization**: Text in the visible viewport is translated first so you can start reading immediately. Off-screen batches yield to the browser idle loop (`requestIdleCallback`) to maintain 60 FPS scrolling.
 - **Shared In-Flight Requests & LRU Cache**: Background service worker maintains an in-memory LRU cache (2,000 phrases) and collapses concurrent duplicate requests into a single promise.
-- **One-Click Instant Rollback**: Revert any translated page to its exact original text in milliseconds, with whitespace and punctuation preserved.
+- **One-Click Instant Rollback**: Revert any translated page to its exact original text in milliseconds, with whitespace, punctuation, attribute values, and child node trees preserved.
 - **Comprehensive CJK & Unicode Support**: Full support for Chinese, Japanese, Korean logograms, single-letter European words, Cyrillic, Indic, and Arabic scripts.
 - **Modern Accessible UI**: Real-time ping latency check, live tab translation state sync, progress bar with phrase and node metrics, and full WCAG AA dark/light mode.
 
@@ -60,26 +64,35 @@ curl -s http://127.0.0.1:5000/languages | grep '"code":"en"'
 │                        Chromium Webpage (DOM)                          │
 │                                                                        │
 │  [Visible Viewport Nodes]              [Off-screen Content Nodes]      │
+│  [Inline Stitched Segments]            [Input / Alt / ARIA Attributes] │
+│  [MutationObserver Dynamic Subtrees]   [Client-Side Routed SPAs]       │
 └──────────────────┬──────────────────────────────────┬──────────────────┘
                    │                                  │
-      (TreeWalker with FILTER_REJECT)     (requestIdleCallback Yielding)
+      (TreeWalker & Tag Partitioning)     (requestIdleCallback Yielding)
+      (Synthetic <x id="..."> Masking)   (250ms Debounced Mutation Queue)
                    │                                  │
                    ▼                                  ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                      content.js (Content Script)                       │
+│  - Contiguous inline element stitching & AST placeholder masking       │
+│  - Attribute translation (placeholder, title, alt, aria-label)         │
+│  - Dynamic content MutationObserver (self-mutation loop guards)        │
 │  - Text sanitization & whitespace preservation                         │
 │  - In-page phrase deduplication (unique string groups)                 │
-│  - Viewport-first priority queue & DOM node references                 │
+│  - Viewport-first priority queue & zero-width marker DOM replacement   │
+│  - Full original state map (nodes, attributes, segment hierarchies)   │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │ chrome.runtime.sendMessage
+                                   │ { action: "translateBatch", format: "html" }
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                    background.js (Service Worker)                      │
 │  - In-memory LRU Cache (2,000 entries)                                 │
 │  - In-flight request deduplication map (shared Promises)               │
+│  - HTML markup format preservation for <x id="..."> synthetic tags     │
 │  - 150-second timeout guard & error isolation                          │
 └──────────────────────────────────┬─────────────────────────────────────┘
-                                   │ HTTP POST /translate
+                                   │ HTTP POST /translate (format: html)
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │           Local LibreTranslate Engine (http://127.0.0.1:5000)          │
@@ -87,6 +100,116 @@ curl -s http://127.0.0.1:5000/languages | grep '"code":"en"'
 │  - Multi-threaded CPU or CUDA GPU acceleration                         │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Deep Dive: Advanced Engine Capabilities
+
+Helium Local Page Translator goes beyond naive text-node replacement by incorporating a production-grade DOM translation engine built for modern, complex web applications.
+
+### 1. Inline Element Sentence Stitching
+
+#### The Sentence Fragmentation Problem
+Traditional webpage translators traverse the DOM text node by text node. When encountering HTML like:
+```html
+<p>Please read our <a href="/terms">terms of service</a> and <strong>privacy policy</strong> carefully before proceeding.</p>
+```
+A naive DOM walker isolates each individual text node:
+1. `"Please read our "`
+2. `"terms of service"`
+3. `" and "`
+4. `"privacy policy"`
+5. `" carefully before proceeding."`
+
+Sending these fragments individually to a neural machine translation engine produces broken results:
+- **Grammar & Context Loss**: The translation model translates each piece without the context of the complete sentence. Polysemous words (e.g. `"terms"` or `"policy"`) lose their meaning.
+- **Word Order Distortion**: Different languages follow different syntactic structures (e.g., Subject-Verb-Object vs. Subject-Object-Verb). In German, Japanese, Hindi, or Turkish, adjectives, verbs, and prepositional phrases routinely shift positions. Translating isolated fragments makes it impossible to reorder words naturally, rendering the output scrambled or nonsensical.
+
+#### Synthetic Placeholder Masking (`<x id="...">`)
+To solve sentence fragmentation, Helium implements an AST-aware run partitioner:
+1. **Contiguous Run Partitioning**: `collectTranslatableItems` partitions sibling child nodes within block elements (`<p>`, `<div>`, `<li>`, etc.) into continuous runs of text and inline formatting tags (`INLINE_TAGS`: `<a>`, `<span>`, `<strong>`, `<em>`, `<code>`, `<b>`, `<i>`, `<u>`, `<small>`, `<sub>`, `<sup>`, `<abbr>`, `<time>`, `<img>`, etc.). Block-level tags (`<div>`, `<p>`, `<h1>`–`<h6>`, `<br>`) act as natural sentence boundaries and trigger segment flushes.
+2. **Synthetic XML Tokenization**: `maskSegment` serializes the run into a single unified sentence, replacing inline elements with lightweight, unique synthetic XML tags:
+   - Elements with content: `<x id="0">terms of service</x>`
+   - Void or empty elements (e.g. `<img>`): `<x id="1"/>`
+   - Example serialized string:
+     `Please read our <x id="0">terms of service</x> and <x id="1">privacy policy</x> carefully before proceeding.`
+3. **HTML Format Transmission**: The request is dispatched to LibreTranslate with `format: "html"`. The Argos Translate / CTranslate2 neural translation pipeline recognizes HTML tags as non-translatable structure tokens, translating only the natural language while keeping placeholder tags intact and grammatically repositioned.
+
+#### Non-Destructive DOM Reconstruction (`parseTranslatedMarkup`)
+Once translated markup is returned (e.g. `Bitte lesen Sie unsere <x id="0">Nutzungsbedingungen</x> und <x id="1">Datenschutzrichtlinie</x> sorgfältig durch, bevor Sie fortfahren.`):
+1. **Element Recycling**: Rather than destroying DOM nodes with `innerHTML` (which breaks event listeners, attached React/Vue fiber keys, component instances, and custom properties), `parseTranslatedMarkup` reuses the **exact original DOM elements** from an internal `elementMap`.
+2. **Stack-Based Reassembly**: A streaming tag parser handles nested formatting tags (e.g. `<a href="..."><strong>Click here</strong></a>`), reconstructing the exact hierarchy in whatever order the translation engine placed them.
+3. **Word Reordering Support**: If the target language syntax moves `<x id="1">` before `<x id="0">`, the real DOM elements are seamlessly repositioned in the DOM tree according to the target language syntax.
+4. **HTML Entity Decoding**: Server responses containing HTML entity escape sequences (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`, `&nbsp;`) are safely decoded via `decodeHtmlEntities`.
+5. **Resilience & Fallback**:
+   - If the neural model duplicates a placeholder token, the engine safely clones the node (`cloneNode(false)`) to prevent DOM corruption.
+   - If the model drops a placeholder tag, the engine recovers the missing element and appends it safely at the end of the segment, ensuring zero element or link loss.
+   - If malformed XML is returned, text fallbacks ensure nothing crashes.
+
+#### Marker-Anchored Atomic Node Replacement
+DOM replacement must not alter neighboring nodes or collapse scrolling positions:
+- `replaceSegmentNodes` creates a zero-width temporary text marker directly before the original run, cleans up removed nodes, and inserts reconstructed nodes before the marker.
+- `restoreSegmentNodes` reverses the swap instantly upon "Restore Original", restoring original text maps and child structures with microsecond latency.
+
+---
+
+### 2. Dynamic Content & SPAs (MutationObserver)
+
+#### The Single-Page Application (SPA) Challenge
+Modern web applications built with React, Vue, Angular, Svelte, Next.js, or Nuxt do not load static HTML documents. Instead, they continually mutate the DOM:
+- Infinite scrolling feeds (Reddit, Twitter/X, LinkedIn, news feeds).
+- Dynamic client-side routing where page navigation updates the DOM without a page refresh.
+- Streaming responses (LLM chats, live commentary, live dashboards).
+- Modals, tooltips, dialogs, and expandable accordions injected on demand.
+
+#### Debounced Tree Observation
+Helium runs an automatic, background `MutationObserver` on `document.body` or `document.documentElement`:
+- **Subtree Monitoring**: Listens for `{ childList: true, subtree: true }` events.
+- **250ms Coalescing Debounce**: Dynamic insertions typically arrive in rapid bursts (e.g., rendering a 20-item feed). A 250ms debounce coalesces all incoming elements into a single batch, minimizing network requests and background worker wakeups.
+
+#### Infinite Loop & Self-Mutation Prevention
+Translators that observe the DOM are notoriously prone to infinite mutation loops (the translator modifies a node, which triggers the observer, which translates again, forever freezing the browser tab). Helium employs a 3-layer safety architecture:
+1. **Active Translation Suppression Flag (`isApplyingTranslation`)**: When Helium modifies text nodes, updates attributes, or swaps stitched segments, `isApplyingTranslation` is set to `true`. Any mutations triggered during this window are immediately discarded by the observer callback.
+2. **Buffer Flush (`takeRecords()`)**: Immediately following DOM mutation operations, `mutationObserver.takeRecords()` is called to drain and discard any queued mutation events before unsetting the suppression flag.
+3. **WeakSet / WeakMap Processed Tracking**:
+   - `state.processedNodes`: A `WeakSet` tracks all DOM text and element nodes that have already been translated.
+   - `state.processedAttributes`: A `WeakMap` tracks translated attributes per element.
+   - Before queueing newly injected subtrees, `isItemAlreadyProcessed()` filters out already-processed items.
+   - Because `WeakSet` and `WeakMap` hold weak references, removed DOM nodes are automatically garbage collected by the browser without memory leaks.
+
+#### Concurrent Worker Safety & Teardown
+- If dynamic mutations arrive while a previous batch is actively translating, the mutation task politely yields and reschedules until `state.busy` is cleared.
+- `stopMutationObserver()` cleanly disconnects the observer, flushes pending subtree sets, and clears pending debounce timers when the user clicks "Restore Original" or navigates away.
+- Dynamic translation failures or cancellations are isolated: aborting a dynamic pass halts cleanly without corrupting the main document or existing translations.
+
+---
+
+### 3. Attribute Translation
+
+#### User-Visible Metadata Beyond Text Nodes
+A significant portion of user-facing web text is stored inside HTML attributes rather than DOM text nodes. Helium automatically extracts, deduplicates, translates, and restores four critical attributes:
+
+| Attribute | Target Elements | Purpose |
+| :--- | :--- | :--- |
+| `placeholder` | `<input>`, `<textarea>` | Form field hints and input guidance |
+| `title` | Any HTML element | Tooltip text displayed on hover |
+| `alt` | `<img>`, `<area>`, `<input type="image">` | Image descriptions and accessible visual text |
+| `aria-label` | Any interactive / accessible element | Accessibility labels for screen readers and UI buttons |
+
+#### Two-Way Property Binding
+For form inputs and textareas, modern JavaScript frameworks and browser engines differentiate between HTML attributes and IDL DOM properties. Helium synchronizes both:
+```javascript
+// Updates both the HTML attribute and the live DOM property
+entry.element.setAttribute(entry.attribute, translatedVal);
+if (entry.attribute === "placeholder" && "placeholder" in entry.element) {
+  entry.element.placeholder = translatedVal;
+}
+```
+This guarantees that UI inputs render the translated placeholder immediately, even if a frontend framework observes property getters.
+
+#### Unified Deduplication & 1-Click Rollback
+- Attribute entries are merged into the shared translation pipeline: identical strings (e.g., repeated `title="Close"` or `alt="Logo"`) are deduplicated against the global translation cache.
+- The original attribute values are preserved in `state.originals`. Clicking "Restore Original" restores the exact previous attribute string (or removes the attribute if it was not originally present).
 
 ---
 
@@ -100,7 +223,7 @@ helium-local-translator/
 │   ├── icon-48.png        # Browser extensions management page (48x48)
 │   └── icon-128.png       # Web Store & high-resolution displays (128x128)
 ├── test/
-│   └── translator.test.js # Standalone Node.js test suite (14 passing unit tests)
+│   └── translator.test.js # Standalone Node.js test suite (34 passing unit tests)
 ├── background.js          # MV3 service worker, LRU cache & request deduplication
 ├── content.js             # High-performance DOM walker, deduplication & batching
 ├── docker-compose.yml     # Out-of-the-box 1-command LibreTranslate deployment
@@ -522,13 +645,11 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 ---
 
-### 6. Are Code Blocks and Forms Translated?
-No. The DOM walker skips:
-- `<code>`, `<pre>`, `<kbd>`, `<samp>`
-- Form controls: `<textarea>`, `<input>`, `<select>`, `<option>`
-- `<script>`, `<style>`, `<noscript>`, `<template>`
-- `<svg>`, `<canvas>`, `<math>`, `<iframe>`, `<audio>`, `<video>`
-- Any element with `contenteditable="true"` or `aria-hidden="true"` or `hidden`
+### 6. Are Code Blocks, Forms, and Attributes Translated?
+- **Code Blocks**: Standalone multiline code blocks (`<pre>`, multiline `<code>` blocks, `<kbd>`, `<samp>`) and non-visual elements (`<script>`, `<style>`, `<noscript>`, `<template>`, `<svg>`, `<canvas>`, `<iframe>`, audio/video) are strictly skipped to prevent code corruption.
+- **Inline Code & Formatting**: Short inline formatting elements (`<code>`, `<a>`, `<span>`, `<strong>`, `<em>`, `<b>`, `<i>`, etc.) embedded inside sentences are safely preserved and stitched using `<x id="...">` placeholders without breaking grammatical sentence structure.
+- **Form Controls & Inputs**: Editable form controls (`<textarea>`, `<input>`, `<select>`, `<option>`, `contenteditable="true"`) are skipped for content translation so user-entered data is never overwritten. However, user-facing `placeholder` attributes on inputs and textareas **are** automatically translated!
+- **Tooltips & Accessibility**: `title`, `alt`, and `aria-label` attributes across all elements are automatically translated.
 
 ---
 
@@ -543,22 +664,55 @@ The repository includes a comprehensive standalone Node.js test suite with zero 
 npm test
 ```
 
-### What the Test Suite Verifies (14 Tests):
-- `splitWhitespace`: Accurate Unicode whitespace extraction and core text separation.
-- `isEligibleText`: Acceptance of CJK logograms, single-letter European words, and rejection of pure numbers/symbols.
-- `shouldRejectElement`: Correct exclusion of code blocks, form inputs, editable fields, and hidden subtrees.
-- `XML & Lowercase Tags`: Robust case-insensitive tag rejection for XHTML/XML elements.
-- `deduplication`: Grouping identical phrases across the DOM and sorting viewport-visible nodes to the front.
-- `TranslationCache`: Correct LRU eviction when cache exceeds limit (`maxSize = 2000`).
-- `translateBatchWithCache`: Efficient caching avoiding repeated network requests.
-- `inFlight Deduplication`: Promise sharing for concurrent identical requests.
-- `Error Isolation`: Mismatched server responses fail cleanly without cache poisoning.
-- `AbortController & Rollback`: Aborting in-flight operations safely reverts DOM nodes.
-- `Batch Chunking`: Proper slicing of unique text groups into batch sizes of 40.
-- `isRestrictedUrl`: Safe protection preventing script execution on internal browser pages (`chrome://`, `edge://`, `about:blank`, webstore).
-- `Manifest V3 Integrity`: Complete validation of `manifest.json` schema, permissions, host permissions, and service worker.
-- `Extension Icons`: Verification that all 4 icon sizes (16, 32, 48, 128) exist on disk with valid PNG headers.
+### What the Test Suite Verifies (34 Tests):
+
+#### 1. Core String Sanitization & Unicode Heuristics (3 Tests)
+- `splitWhitespace`: Accurate Unicode whitespace extraction, preserving leading and trailing spaces around core translatable text.
+- `isEligibleText`: Detection of translatable text with Unicode letter categories (`\p{L}`), accepting CJK logograms and single letters while rejecting pure numbers and symbols.
+- `decodeHtmlEntities`: Decoding of HTML entity escape sequences (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`, `&nbsp;`).
+
+#### 2. DOM Traversal, Tag Filtering & Viewport Prioritization (5 Tests)
+- `shouldRejectElement`: Rejection of skip tags (`<script>`, `<style>`), hidden elements, and `contentEditable` fields.
+- `shouldRejectElement (lowercase & XML)`: Case-insensitive tag rejection handling XHTML and XML elements.
+- `deduplication`: Grouping identical phrases across DOM nodes and prioritizing viewport-visible items.
+- `isRestrictedUrl`: Safe protection preventing script execution on internal browser pages (`chrome://`, `edge://`, `about:blank`, web store).
+- `MAX_TEXT_NODES boundary cap`: Enforces safe 10,000 node traversal limits to prevent DOM exhaustion on massive web pages.
+
+#### 3. Background Service Worker, LRU Caching & Network Deduplication (7 Tests)
+- `TranslationCache`: Strict LRU cache eviction when cache exceeds capacity (`maxSize = 2000`).
+- `translateBatchWithCache`: Efficient caching querying only uncached strings while reusing cached entries.
+- `in-flight promise deduplication`: Merging concurrent identical requests into a shared promise to prevent redundant network traffic.
+- `translateBatchWithCache error isolation`: Graceful failure on server count mismatch without cache poisoning.
+- `batch size chunking`: Slicing deduplicated phrase groups into optimal batches of 40.
+- `background.js HTML support`: Proper payload delivery with `format: "html"` and cache integration.
 - `Live LibreTranslate Server`: Real-time connectivity and translation validation if local engine is online.
+
+#### 4. Inline Element Sentence Stitching & Non-Destructive DOM Reconstruction (10 Tests)
+- `maskSegment`: Synthetic placeholder tagging (`<x id="...">` and self-closing `<x id="..."/>`) across `<a>`, `<span>`, `<strong>`, `<em>`, `<code>`.
+- `parseTranslatedMarkup`: Reconstructing nested DOM child elements and text nodes within translated sentences.
+- `Word reordering`: Handling target language grammatical word and tag repositioning (e.g. SOV vs SVO shifts).
+- `Nested inline elements`: Preserving hierarchical parent-child relationships within complex formatted blocks.
+- `Placeholder error resilience`: Safe fallback handling for dropped, mangled, or malformed placeholder IDs without crashing.
+- `Duplicate placeholder handling`: Safe non-destructive DOM cloning (`cloneNode(false)`) when translated markup duplicates placeholder tokens.
+- `IMG tag inline handling`: Treating `<img>` as an inline sentence token (`<x id="..."/>`) without breaking sentence continuity.
+- `replaceSegmentNodes & restoreSegmentNodes`: Zero-width marker-based DOM swapping and strict order preservation.
+- `Order preservation when starting with element`: Maintaining exact node positioning even when a segment begins with an element node.
+- `Live sentence stitching test`: Live end-to-end placeholder preservation test against local LibreTranslate engine.
+
+#### 5. Dynamic Content & SPA MutationObserver (2 Tests)
+- `debounced MutationObserver`: Watching dynamic DOM tree additions (React, Vue, infinite scroll feeds) with 250ms debouncing.
+- `Aborting dynamic translation`: Safe abort handling during active mutations without corrupting restored DOM state.
+
+#### 6. Attribute Translation (2 Tests)
+- `Attribute collection`: Extracting translatable text from `placeholder`, `title`, `alt`, and `aria-label`.
+- `Nested attribute extraction`: Collecting attributes on inline elements and nested segment elements.
+
+#### 7. End-to-End Pipeline & Extension Integrity (5 Tests)
+- `End-to-End translateItems`: Unified orchestration translating text nodes, stitched segments, and attributes, followed by full 1-click rollback.
+- `restoreOriginals & AbortController`: Safe cancellation and complete DOM state restoration.
+- `Contiguous run grouping`: Grouping adjacent inline formatting elements into a single sentence while maintaining block separation.
+- `Block boundary preservation`: Preserving separate blocks across block-level HTML tags.
+- `Manifest V3 Integrity`: Complete validation of `manifest.json` schema, permissions, host permissions, and all 4 extension icons on disk.
 
 
 ## Privacy & Security Guarantee
