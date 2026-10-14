@@ -1286,3 +1286,73 @@ test("Hardware Acceleration & Tuning: translatePage accepts settings and applies
   await core.restoreOriginals();
   assert.equal(p.childNodes[0].nodeValue, "Page sentence to translate");
 });
+
+test("Branding consistency: manifest, package, popup, and README declare Libre Local Translator", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+
+  // manifest.json
+  const manifest = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "manifest.json"), "utf-8"));
+  assert.equal(manifest.name, "Libre Local Translator");
+
+  // package.json
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"));
+  assert.equal(pkg.name, "libre-local-translator");
+
+  // popup.html
+  const popupHtml = fs.readFileSync(path.resolve(process.cwd(), "popup.html"), "utf-8");
+  assert.ok(popupHtml.includes("<title>Libre Local Translator</title>"));
+  assert.ok(popupHtml.includes('<h1 class="title">Libre Local Translator</h1>'));
+
+  // README.md
+  const readme = fs.readFileSync(path.resolve(process.cwd(), "README.md"), "utf-8");
+  assert.ok(readme.startsWith("# Libre Local Translator"));
+});
+
+test("Hardware Acceleration: translatePage falls back to chrome.storage.local if no settings passed", async () => {
+  const doc = globalThis.document;
+  doc.body = new MockDOMNode(1, "BODY");
+  doc.body.isRoot = true;
+
+  const p = new MockDOMNode(1, "P");
+  p.appendChild(new MockDOMNode(3, "#text", "Storage fallback test text"));
+  doc.body.appendChild(p);
+
+  // Clear state.settings
+  core.state.settings = null;
+
+  // Mock chrome.storage.local
+  const originalChrome = globalThis.chrome;
+  globalThis.chrome = {
+    ...originalChrome,
+    storage: {
+      local: {
+        get: async (keys) => {
+          if (keys.includes("translatorSettings")) {
+            return {
+              translatorSettings: {
+                preset: "gpu-python",
+                mode: "gpu-python",
+                threads: 4,
+                batchSize: 100,
+                memory: "high"
+              }
+            };
+          }
+          return {};
+        }
+      }
+    }
+  };
+
+  try {
+    const res = await core.translatePage();
+    assert.equal(res.ok, true);
+    assert.equal(core.state.settings.mode, "gpu-python");
+    assert.equal(core.state.settings.threads, 4);
+    assert.equal(core.state.settings.batchSize, 100);
+    await core.restoreOriginals();
+  } finally {
+    globalThis.chrome = originalChrome;
+  }
+});

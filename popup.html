@@ -23,7 +23,7 @@
           </svg>
         </div>
         <div class="brand-text">
-          <h1 class="title">Libre Translator</h1>
+          <h1 class="title">Libre Local Translator</h1>
           <p class="subtitle">Local LibreTranslate → English</p>
         </div>
       </div>
@@ -48,14 +48,14 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
           </svg>
-          <span class="settings-title">Hardware & Tuning</span>
+          <span class="settings-title">Hardware Acceleration & Tuning</span>
         </div>
         <span id="settings-saved-tag" class="settings-saved-tag" hidden>Saved</span>
       </div>
 
-      <!-- Hardware Profile Preset Selector -->
+      <!-- Quick Preset Selector -->
       <div class="setting-field">
-        <label for="setting-preset" class="setting-label">Hardware Profile</label>
+        <label for="setting-preset" class="setting-label">Preset Configuration</label>
         <div class="select-wrapper">
           <select id="setting-preset" class="setting-select">
             <option value="cpu-default">CPU Standard (4 Cores · Batch 40)</option>
@@ -63,15 +63,40 @@
             <option value="gpu-docker">NVIDIA GPU (Docker: --gpus all)</option>
             <option value="gpu-python">NVIDIA GPU (Python / PyTorch CUDA)</option>
             <option value="eco-memory">Low Memory Mode (~1.5 GB RAM)</option>
-            <option value="custom">Custom Tuning</option>
+            <option value="custom">Custom Configuration</option>
           </select>
+        </div>
+      </div>
+
+      <!-- Hardware Acceleration Mode & Memory Allocation -->
+      <div class="setting-row">
+        <div class="setting-field setting-col">
+          <label for="setting-mode" class="setting-label">Hardware Acceleration</label>
+          <div class="select-wrapper">
+            <select id="setting-mode" class="setting-select">
+              <option value="cpu">CPU (Multi-thread)</option>
+              <option value="gpu-docker">NVIDIA GPU (Docker)</option>
+              <option value="gpu-python">NVIDIA GPU (Python)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting-field setting-col">
+          <label for="setting-memory" class="setting-label">Memory Allocation</label>
+          <div class="select-wrapper">
+            <select id="setting-memory" class="setting-select">
+              <option value="standard">Standard (~1.5 GB+)</option>
+              <option value="eco">Low RAM (~1.5 GB)</option>
+              <option value="high">Dedicated (8 GB+)</option>
+            </select>
+          </div>
         </div>
       </div>
 
       <!-- Tuning Parameters Row: Threads & Batch Limit -->
       <div class="setting-row">
         <div class="setting-field setting-col">
-          <label for="setting-threads" class="setting-label">CPU Threads</label>
+          <label for="setting-threads" class="setting-label">CPU Worker Threads</label>
           <div class="select-wrapper">
             <select id="setting-threads" class="setting-select">
               <option value="2">2 Cores</option>
@@ -103,7 +128,7 @@
         </div>
         <div class="tuning-detail">
           <span class="tuning-detail-label">Config:</span>
-          <code class="tuning-code" id="tuning-config-code">--threads 4</code>
+          <code class="tuning-code" id="tuning-config-code">--threads 4 --batch-limit 40</code>
         </div>
         <div class="tuning-detail">
           <span class="tuning-detail-label">Memory:</span>

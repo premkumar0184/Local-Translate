@@ -10,9 +10,9 @@
 [![Tested on Chromium](https://img.shields.io/badge/Chromium-All%20Browsers-success.svg)](#part-2-browser-installation-guide)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local%20%7C%20Zero%20Telemetry-brightgreen.svg)](#privacy--security-guarantee)
-[![Tests Passing](https://img.shields.io/badge/Tests-38%2F38%20Passing-brightgreen.svg)](#automated-test-suite)
+[![Tests Passing](https://img.shields.io/badge/Tests-40%2F40%20Passing-brightgreen.svg)](#automated-test-suite)
 
-[Features](#key-features) • [Engine Deep Dive](#deep-dive-advanced-engine-capabilities) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Tests (38 Passing)](#automated-test-suite) • [Troubleshooting](#part-4-troubleshooting--faq)
+[Features](#key-features) • [Engine Deep Dive](#deep-dive-advanced-engine-capabilities) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Tests (40 Passing)](#automated-test-suite) • [Troubleshooting](#part-4-troubleshooting--faq)
 
 </div>
 
@@ -445,17 +445,17 @@ If your machine is not connected to the internet:
 | **NVIDIA GPU (Python)** | Install CUDA-enabled PyTorch in venv | Automatic CTranslate2 CUDA inference |
 | **Memory Allocation** | ~1.5 GB base RAM + ~200 MB per loaded language model | Smooth operation on machines with 8 GB+ RAM |
 
-#### Extension Hardware Tuning & Presets Menu
-Libre Local Translator includes a built-in **Hardware & Tuning Settings Menu** right inside the extension popup:
+#### Extension Hardware Tuning & Settings Menu
+Libre Local Translator includes a built-in **Hardware Acceleration & Tuning Settings Menu** right inside the extension popup:
 1. Click the **gear icon (⚙)** in the popup header to open the Hardware & Tuning panel.
-2. Select your hardware configuration preset:
-   - **CPU Standard (Default)**: 4 Cores · Batch Limit 40 (balanced daily browsing).
-   - **CPU Multi-Core (Tuned)**: `--threads 8` · Batch Limit 100 (prevents bottlenecking during multi-fragment batches).
-   - **NVIDIA GPU (Docker)**: `--gpus all` · Batch Limit 100 (5x to 15x inference speedup).
-   - **NVIDIA GPU (Python / PyTorch)**: CUDA matrix batching directly in python venv.
-   - **Low Memory Mode (~1.5 GB RAM)**: 2 Cores · Batch Limit 25 (optimized for <= 8 GB RAM machines).
-   - **Custom Configuration**: Specify custom CPU worker threads (2, 4, 8, 16) and batch limits (25, 40, 100, 150).
-3. Settings auto-save instantly to extension storage (`chrome.storage.local`) and immediately calibrate all page translation batches.
+2. Select your configuration or tune individual hardware controls:
+   - **Preset Profiles**: CPU Standard (4 Cores · Batch 40), CPU Multi-Core (--threads 8 · Batch 100), NVIDIA GPU (Docker: --gpus all), NVIDIA GPU (Python / PyTorch CUDA), Low Memory Mode (~1.5 GB RAM), or Custom Configuration.
+   - **Hardware Acceleration Mode**: Select between CPU (Multi-threaded), NVIDIA GPU (Docker: `docker run --gpus all ...`), or NVIDIA GPU (Python: CUDA-enabled PyTorch in venv).
+   - **CPU Worker Threads**: Select 2, 4, 8, or 16 CPU cores to match your hardware concurrency.
+   - **Batch Limit**: Choose matrix batching limits (25, 40, 100, 150) to optimize CTranslate2 throughput.
+   - **Memory Allocation**: Configure Standard (~1.5 GB + ~200 MB/model), Low RAM (~1.5 GB for <= 8 GB RAM machines), or Dedicated High Memory.
+3. The dynamic preview card updates in real-time, showing expected impact and CLI/Docker launch commands.
+4. Settings auto-save instantly to extension storage (`chrome.storage.local`) and calibrate all page translation batches.
 
 #### Running with GPU Acceleration (Docker)
 Ensure you have the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed:
@@ -486,8 +486,8 @@ Save the repository to a permanent directory on your computer:
 git clone https://github.com/premkumar0184/Local-Translate.git ~/Apps/libre-local-translator
 
 # Or download and extract the ZIP file to:
-# Linux / macOS: ~/Apps/helium-local-translator
-# Windows: C:\Apps\helium-local-translator
+# Linux / macOS: ~/Apps/libre-local-translator
+# Windows: C:\Apps\libre-local-translator
 ```
 
 > ⚠️ **Important**: Do not move or delete this folder after installing, as the browser loads the extension files directly from this folder in developer mode.
@@ -500,13 +500,13 @@ git clone https://github.com/premkumar0184/Local-Translate.git ~/Apps/libre-loca
 1. In the address bar, navigate to `chrome://extensions` or `helium://extensions`.
 2. Toggle **Developer mode** on (top-right switch).
 3. Click the **Load unpacked** button.
-4. Select the `helium-local-translator` directory.
+4. Select the `libre-local-translator` directory.
 
 #### 🌐 Google Chrome & Chromium
 1. Navigate to `chrome://extensions`.
 2. Turn ON **Developer mode** using the toggle switch in the upper-right corner.
 3. Click **Load unpacked** in the top-left toolbar.
-4. Select the `helium-local-translator` folder.
+4. Select the `libre-local-translator` folder.
 
 #### 🦁 Brave Browser
 1. Navigate to `brave://extensions`.
@@ -518,23 +518,23 @@ git clone https://github.com/premkumar0184/Local-Translate.git ~/Apps/libre-loca
 1. Navigate to `edge://extensions`.
 2. In the left navigation menu, enable the **Developer mode** toggle.
 3. Click the **Load unpacked** button at the top of the page.
-4. Select the `helium-local-translator` folder.
+4. Select the `libre-local-translator` folder.
 
 #### 🔴 Opera & Opera GX
 1. Navigate to `opera://extensions`.
 2. Enable **Developer mode** via the switch in the top-right corner.
 3. Click **Load unpacked** in the top bar.
-4. Select the `helium-local-translator` folder.
+4. Select the `libre-local-translator` folder.
 
 #### ⚡ Vivaldi
 1. Navigate to `vivaldi://extensions`.
 2. Enable **Developer mode** in the upper-right corner.
-3. Click **Load unpacked** and select the `helium-local-translator` folder.
+3. Click **Load unpacked** and select the `libre-local-translator` folder.
 
 #### 🎨 Arc / Other Chromium Browsers
 1. Open Arc Settings (`Cmd + ,` or `Ctrl + ,`) -> **Extensions** (or navigate to `arc://extensions`).
 2. Enable **Developer mode**.
-3. Click **Load unpacked** and choose the `helium-local-translator` folder.
+3. Click **Load unpacked** and choose the `libre-local-translator` folder.
 
 ---
 
@@ -676,7 +676,7 @@ The repository includes a comprehensive standalone Node.js test suite with zero 
 npm test
 ```
 
-### What the Test Suite Verifies (38 Tests):
+### What the Test Suite Verifies (40 Tests):
 
 #### 1. Core String Sanitization & Unicode Heuristics (3 Tests)
 - `splitWhitespace`: Accurate Unicode whitespace extraction, preserving leading and trailing spaces around core translatable text.
@@ -726,11 +726,13 @@ npm test
 - `Block boundary preservation`: Preserving separate blocks across block-level HTML tags.
 - `Manifest V3 Integrity`: Complete validation of `manifest.json` schema, permissions, host permissions, and all 4 extension icons on disk.
 
-#### 8. Hardware Acceleration, Tuning & Presets (4 Tests)
+#### 8. Hardware Acceleration, Tuning & Presets (6 Tests)
 - `manifest.json Libre Local Translator & storage`: Validates extension name and storage permission.
 - `Core & background Libre aliases`: Ensures backward-compatible aliases for `__libreLocalTranslatorCore` and `__libreBackground`.
 - `Hardware tuning translateItems`: Verifies dynamic batch size (e.g. 100) and worker thread concurrency (e.g. 8).
 - `Hardware tuning translatePage`: Verifies end-to-end hardware profile options propagation and settings persistence.
+- `Branding consistency across files`: Verifies "Libre Local Translator" naming across `manifest.json`, `package.json`, `popup.html`, and `README.md`.
+- `Hardware storage fallback`: Verifies asynchronous fallback loading from `chrome.storage.local` when no payload is passed to `translatePage`.
 
 
 <a id="privacy-security-guarantee"></a>

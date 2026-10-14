@@ -11,6 +11,8 @@ const settingsToggleBtn = document.getElementById("settings-toggle-btn");
 const settingsPanel = document.getElementById("settings-panel");
 const settingsSavedTag = document.getElementById("settings-saved-tag");
 const settingPreset = document.getElementById("setting-preset");
+const settingMode = document.getElementById("setting-mode");
+const settingMemory = document.getElementById("setting-memory");
 const settingThreads = document.getElementById("setting-threads");
 const settingBatchLimit = document.getElementById("setting-batch-limit");
 const tuningBadge = document.getElementById("tuning-badge");
@@ -35,86 +37,100 @@ let isServerOnline = false;
 const PRESETS = {
   "cpu-default": {
     name: "CPU Standard",
-    badge: "Balanced",
+    mode: "cpu",
     threads: 4,
     batchSize: 40,
-    impact: "Balanced CPU performance for standard browsing.",
-    config: "--threads 4",
-    memory: "~1.5 GB base RAM + ~200 MB per loaded language model"
+    memory: "standard"
   },
   "cpu-tuned": {
     name: "CPU Multi-Core",
-    badge: "Multi-Core",
+    mode: "cpu",
     threads: 8,
     batchSize: 100,
-    impact: "Prevents bottle-necking during batch translation requests.",
-    config: "--threads 8 --batch-limit 100",
-    memory: "Smooth operation on machines with 8 GB+ RAM"
+    memory: "high"
   },
   "gpu-docker": {
     name: "NVIDIA GPU (Docker)",
-    badge: "5x-15x GPU",
+    mode: "gpu-docker",
     threads: 4,
     batchSize: 100,
-    impact: "5x to 15x inference speedup on CUDA-capable GPUs.",
-    config: "docker run --gpus all ... --batch-limit 100",
-    memory: "Automatic CTranslate2 CUDA inference via NVIDIA Toolkit"
+    memory: "high"
   },
   "gpu-python": {
     name: "NVIDIA GPU (Python)",
-    badge: "PyTorch CUDA",
+    mode: "gpu-python",
     threads: 4,
     batchSize: 100,
-    impact: "Automatic CTranslate2 CUDA inference in Python venv.",
-    config: "Install CUDA-enabled PyTorch in venv",
-    memory: "Optimizes matrix throughput directly with CUDA"
+    memory: "high"
   },
   "eco-memory": {
     name: "Low Memory Mode",
-    badge: "Low RAM",
+    mode: "cpu",
     threads: 2,
     batchSize: 25,
-    impact: "Minimizes background memory pressure on budget machines.",
-    config: "--threads 2 --batch-limit 25",
-    memory: "~1.5 GB base RAM (recommended for <= 8 GB RAM)"
-  },
-  "custom": {
-    name: "Custom Tuning",
-    badge: "Custom",
-    threads: 4,
-    batchSize: 40,
-    impact: "Custom user-configured thread concurrency and batch limits.",
-    config: "User-defined configuration",
-    memory: "Dynamic system allocation"
+    memory: "eco"
   }
 };
 
 const DEFAULT_SETTINGS = {
   preset: "cpu-default",
+  mode: "cpu",
   threads: 4,
-  batchSize: 40
+  batchSize: 40,
+  memory: "standard"
 };
 
 let currentSettings = { ...DEFAULT_SETTINGS };
 let saveTimeout = null;
 
 function updateTuningCard() {
-  const presetKey = currentSettings.preset in PRESETS ? currentSettings.preset : "custom";
-  const p = PRESETS[presetKey];
-  if (!p) return;
+  const { mode = "cpu", threads = 4, batchSize = 40, memory = "standard" } = currentSettings;
 
-  if (tuningBadge) tuningBadge.textContent = p.badge;
-  if (tuningImpactText) tuningImpactText.textContent = p.impact;
-  if (tuningConfigCode) {
-    tuningConfigCode.textContent = presetKey === "custom"
-      ? `--threads ${currentSettings.threads} --batch-limit ${currentSettings.batchSize}`
-      : p.config;
+  let badge = "Tuned";
+  let impact = "Balanced CPU performance for standard browsing.";
+  let config = `--threads ${threads} --batch-limit ${batchSize}`;
+  let memDetail = "~1.5 GB base RAM + ~200 MB per loaded model";
+
+  if (mode === "gpu-docker") {
+    badge = "5x-15x GPU";
+    impact = "5x to 15x inference speedup on CUDA-capable GPUs.";
+    config = `docker run --gpus all ... --threads ${threads} --batch-limit ${batchSize}`;
+  } else if (mode === "gpu-python") {
+    badge = "PyTorch CUDA";
+    impact = "Automatic CTranslate2 CUDA inference in Python venv.";
+    config = `Install CUDA PyTorch; --threads ${threads} --batch-limit ${batchSize}`;
+  } else {
+    // CPU mode
+    if (threads >= 8) {
+      badge = "Multi-Core";
+      impact = "Prevents bottle-necking during batch translation requests.";
+    } else if (memory === "eco" || batchSize <= 25) {
+      badge = "Low RAM";
+      impact = "Minimizes background memory pressure on budget machines.";
+    } else {
+      badge = "Balanced";
+      impact = "Balanced CPU performance for standard browsing.";
+    }
   }
-  if (tuningMemoryText) tuningMemoryText.textContent = p.memory;
+
+  if (memory === "eco") {
+    memDetail = "~1.5 GB base RAM (recommended for <= 8 GB RAM)";
+  } else if (memory === "high") {
+    memDetail = "Smooth operation on machines with 8 GB+ RAM";
+  } else {
+    memDetail = "~1.5 GB base RAM + ~200 MB per loaded model";
+  }
+
+  if (tuningBadge) tuningBadge.textContent = badge;
+  if (tuningImpactText) tuningImpactText.textContent = impact;
+  if (tuningConfigCode) tuningConfigCode.textContent = config;
+  if (tuningMemoryText) tuningMemoryText.textContent = memDetail;
 }
 
 function applySettingsToUI() {
-  if (settingPreset) settingPreset.value = currentSettings.preset || "cpu-default";
+  if (settingPreset) settingPreset.value = currentSettings.preset || "custom";
+  if (settingMode) settingMode.value = currentSettings.mode || "cpu";
+  if (settingMemory) settingMemory.value = currentSettings.memory || "standard";
   if (settingThreads) settingThreads.value = String(currentSettings.threads || 4);
   if (settingBatchLimit) settingBatchLimit.value = String(currentSettings.batchSize || 40);
   updateTuningCard();
@@ -162,15 +178,17 @@ async function loadSettings() {
   applySettingsToUI();
 }
 
-function checkIfPresetMatchesCustom() {
+function updatePresetFromIndividualSettings() {
   let matched = "custom";
-  for (const [key, val] of Object.entries(PRESETS)) {
-    if (key !== "custom" && val.threads === currentSettings.threads && val.batchSize === currentSettings.batchSize) {
-      if (currentSettings.preset === key) {
-        matched = key;
-        break;
-      }
-      if (matched === "custom") matched = key;
+  for (const [key, p] of Object.entries(PRESETS)) {
+    if (
+      p.mode === currentSettings.mode &&
+      p.threads === currentSettings.threads &&
+      p.batchSize === currentSettings.batchSize &&
+      p.memory === currentSettings.memory
+    ) {
+      matched = key;
+      break;
     }
   }
   currentSettings.preset = matched;
@@ -207,14 +225,34 @@ if (settingPreset) {
   settingPreset.addEventListener("change", () => {
     const selected = settingPreset.value;
     if (selected !== "custom" && PRESETS[selected]) {
+      const p = PRESETS[selected];
       currentSettings.preset = selected;
-      currentSettings.threads = PRESETS[selected].threads;
-      currentSettings.batchSize = PRESETS[selected].batchSize;
-      if (settingThreads) settingThreads.value = String(currentSettings.threads);
-      if (settingBatchLimit) settingBatchLimit.value = String(currentSettings.batchSize);
+      currentSettings.mode = p.mode;
+      currentSettings.threads = p.threads;
+      currentSettings.batchSize = p.batchSize;
+      currentSettings.memory = p.memory;
+      applySettingsToUI();
     } else {
       currentSettings.preset = "custom";
+      updateTuningCard();
     }
+    saveSettings();
+  });
+}
+
+if (settingMode) {
+  settingMode.addEventListener("change", () => {
+    currentSettings.mode = settingMode.value || "cpu";
+    updatePresetFromIndividualSettings();
+    updateTuningCard();
+    saveSettings();
+  });
+}
+
+if (settingMemory) {
+  settingMemory.addEventListener("change", () => {
+    currentSettings.memory = settingMemory.value || "standard";
+    updatePresetFromIndividualSettings();
     updateTuningCard();
     saveSettings();
   });
@@ -223,7 +261,7 @@ if (settingPreset) {
 if (settingThreads) {
   settingThreads.addEventListener("change", () => {
     currentSettings.threads = parseInt(settingThreads.value, 10) || 4;
-    checkIfPresetMatchesCustom();
+    updatePresetFromIndividualSettings();
     updateTuningCard();
     saveSettings();
   });
@@ -232,7 +270,7 @@ if (settingThreads) {
 if (settingBatchLimit) {
   settingBatchLimit.addEventListener("change", () => {
     currentSettings.batchSize = parseInt(settingBatchLimit.value, 10) || 40;
-    checkIfPresetMatchesCustom();
+    updatePresetFromIndividualSettings();
     updateTuningCard();
     saveSettings();
   });

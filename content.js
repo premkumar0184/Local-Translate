@@ -902,6 +902,13 @@
   async function translatePage(customSettings = null) {
     if (customSettings) {
       state.settings = customSettings;
+    } else if (!state.settings && typeof chrome !== "undefined" && chrome?.storage?.local?.get) {
+      try {
+        const stored = await chrome.storage.local.get(["translatorSettings"]);
+        if (stored?.translatorSettings) {
+          state.settings = stored.translatorSettings;
+        }
+      } catch {}
     }
     if (state.busy) return { ok: false, error: "A translation is already running." };
 

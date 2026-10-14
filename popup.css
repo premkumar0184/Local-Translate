@@ -66,7 +66,7 @@
 
 body {
   margin: 0;
-  width: 360px;
+  width: 380px;
   background: var(--bg-app);
   color: var(--text-main);
   font-family: var(--font-sans);
@@ -110,19 +110,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   min-width: 0;
+  flex-shrink: 1;
 }
 
 .logo-box {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   border-radius: var(--radius-md);
@@ -138,7 +139,7 @@ body {
 
 .title {
   margin: 0;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   letter-spacing: -0.015em;
   color: var(--text-main);
@@ -148,7 +149,7 @@ body {
 
 .subtitle {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   line-height: 1.2;
   white-space: nowrap;
@@ -160,13 +161,13 @@ body {
 .server-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 5px;
+  padding: 3px 8px;
   background: var(--bg-surface);
   border: 1px solid var(--border-app);
   border-radius: 9999px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--text-secondary);
   flex-shrink: 0;
@@ -424,19 +425,20 @@ body {
 
 .tuning-impact-text {
   color: var(--text-secondary);
+  line-height: 1.35;
 }
 
 .tuning-detail {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 6px;
-  overflow: hidden;
 }
 
 .tuning-detail-label {
   font-weight: 600;
   color: var(--text-tertiary);
   flex-shrink: 0;
+  line-height: 1.35;
 }
 
 .tuning-code {
@@ -447,16 +449,13 @@ body {
   border: 1px solid var(--border-app);
   padding: 1px 5px;
   border-radius: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .tuning-memory-text {
   color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
 }
 
 /* Settings Actions */
