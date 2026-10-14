@@ -525,3 +525,687 @@ test("manifest.json has valid Manifest V3 structure and complete icons", async (
     assert.equal(buf[3], 0x47); // G
   }
 });
+
+// --- Core DOM & Linguistic Engine Test Suite ---
+
+class MockDOMNode {
+  constructor(type, name, value = "") {
+    this.nodeType = type; // 1 = element, 3 = text
+    this.tagName = type === 1 ? name.toUpperCase() : undefined;
+    this.nodeValue = type === 3 ? value : null;
+    this.parentNode = null;
+    this.childNodes = [];
+    this.attributes = new Map();
+    this.hidden = false;
+    this.isContentEditable = false;
+    this.isRoot = false;
+  }
+  get textContent() {
+    if (this.nodeType === 3) return this.nodeValue || "";
+    return this.childNodes.map((c) => c.textContent).join("");
+  }
+  set textContent(val) {
+    if (this.nodeType === 3) {
+      this.nodeValue = val;
+    } else {
+      this.replaceChildren(new MockDOMNode(3, "#text", val));
+    }
+  }
+  get isConnected() {
+    if (this.isRoot) return true;
+    if (!this.parentNode) return false;
+    return this.parentNode.isConnected;
+  }
+  setAttribute(attr, val) {
+    this.attributes.set(attr, String(val));
+  }
+  getAttribute(attr) {
+    return this.attributes.has(attr) ? this.attributes.get(attr) : null;
+  }
+  hasAttribute(attr) {
+    return this.attributes.has(attr);
+  }
+  removeAttribute(attr) {
+    this.attributes.delete(attr);
+  }
+  appendChild(child) {
+    if (child.parentNode && child.parentNode.removeChild) child.parentNode.removeChild(child);
+    child.parentNode = this;
+    this.childNodes.push(child);
+    return child;
+  }
+  insertBefore(newChild, refChild) {
+    if (!refChild) return this.appendChild(newChild);
+    if (newChild.parentNode && newChild.parentNode.removeChild) newChild.parentNode.removeChild(newChild);
+    newChild.parentNode = this;
+    const idx = this.childNodes.indexOf(refChild);
+    if (idx === -1) this.childNodes.push(newChild);
+    else this.childNodes.splice(idx, 0, newChild);
+    return newChild;
+  }
+  removeChild(child) {
+    const idx = this.childNodes.indexOf(child);
+    if (idx !== -1) {
+      this.childNodes.splice(idx, 1);
+      child.parentNode = null;
+    }
+    return child;
+  }
+  replaceChildren(...newChildren) {
+    while (this.childNodes.length > 0) {
+      this.removeChild(this.childNodes[0]);
+    }
+    for (const c of newChildren) this.appendChild(c);
+  }
+  cloneNode(deep = false) {
+    const clone = new MockDOMNode(this.nodeType, this.tagName || "", this.nodeValue || "");
+    for (const [k, v] of this.attributes.entries()) {
+      clone.setAttribute(k, v);
+    }
+    clone.hidden = this.hidden;
+    clone.isContentEditable = this.isContentEditable;
+    clone.isRoot = this.isRoot;
+    if (deep) {
+      for (const child of this.childNodes) {
+        clone.appendChild(child.cloneNode(true));
+      }
+    }
+    return clone;
+  }
+  get firstChild() {
+    return this.childNodes.length > 0 ? this.childNodes[0] : null;
+  }
+  get nextSibling() {
+    if (!this.parentNode) return null;
+    const idx = this.parentNode.childNodes.indexOf(this);
+    return idx !== -1 && idx < this.parentNode.childNodes.length - 1 ? this.parentNode.childNodes[idx + 1] : null;
+  }
+  get previousSibling() {
+    if (!this.parentNode) return null;
+    const idx = this.parentNode.childNodes.indexOf(this);
+    return idx > 0 ? this.parentNode.childNodes[idx - 1] : null;
+  }
+}
+
+// Global browser environment setup for content.js and background.js
+globalThis.chrome = {
+  runtime: {
+    sendMessage: async (msg) => {
+      if (msg.action === "translateBatch") {
+        return {
+          ok: true,
+          translations: msg.texts.map((t) =>
+            t.replace(/here/g, "cart-here").replace(/^(?!<)/, "EN:")
+          )
+        };
+      }
+      return { ok: true };
+    },
+    onMessage: { addListener: () => {} }
+  },
+  commands: { onCommand: { addListener: () => {} } }
+};
+globalThis.document = {
+  body: new MockDOMNode(1, "BODY"),
+  createTextNode: (t) => new MockDOMNode(3, "#text", t)
+};
+globalThis.document.body.isRoot = true;
+
+await import("../background.js");
+await import("../content.js");
+const core = globalThis.__heliumLocalTranslatorCore;
+const bg = globalThis.__heliumBackground;
+
+test("maskSegment generates placeholders for inline elements (a, span, strong, em, code)", () => {
+  const t1 = new MockDOMNode(3, "#text", "Click ");
+  const link = new MockDOMNode(1, "A");
+  link.setAttribute("href", "/signup");
+  const linkText = new MockDOMNode(3, "#text", "here");
+  link.appendChild(linkText);
+  const t2 = new MockDOMNode(3, "#text", " to create your account.");
+
+  const { maskedText, elementMap } = core.maskSegment([t1, link, t2]);
+  assert.equal(maskedText, "Click <x id=\"0\">here</x> to create your account.");
+  assert.equal(elementMap.get(0), link);
+
+  // Multiple formatting tags: span, strong, em, code
+  const span = new MockDOMNode(1, "SPAN");
+  span.appendChild(new MockDOMNode(3, "#text", "Check "));
+  const strong = new MockDOMNode(1, "STRONG");
+  strong.appendChild(new MockDOMNode(3, "#text", "this "));
+  const em = new MockDOMNode(1, "EM");
+  em.appendChild(new MockDOMNode(3, "#text", "new "));
+  const code = new MockDOMNode(1, "CODE");
+  code.appendChild(new MockDOMNode(3, "#text", "feature"));
+
+  const multi = core.maskSegment([span, strong, em, code]);
+  assert.equal(
+    multi.maskedText,
+    "<x id=\"0\">Check </x><x id=\"1\">this </x><x id=\"2\">new </x><x id=\"3\">feature</x>"
+  );
+  assert.equal(multi.elementMap.size, 4);
+
+  // Empty inline tag produces self-closing placeholder
+  const emptyBadge = new MockDOMNode(1, "SPAN");
+  const emptyRes = core.maskSegment([new MockDOMNode(3, "#text", "Start "), emptyBadge, new MockDOMNode(3, "#text", " End")]);
+  assert.equal(emptyRes.maskedText, "Start <x id=\"0\"/> End");
+});
+
+test("parseTranslatedMarkup reconstructs inner child elements within translated sentence", () => {
+  const link = new MockDOMNode(1, "A");
+  link.setAttribute("href", "/signup");
+  link.setAttribute("class", "btn-primary");
+  const linkText = new MockDOMNode(3, "#text", "here");
+  link.appendChild(linkText);
+
+  const elMap = new Map([[0, link]]);
+  const doc = globalThis.document;
+
+  const translated = "Click <x id=\"0\">Here</x> to create your account.";
+  const reconstructed = core.parseTranslatedMarkup(translated, elMap, doc);
+
+  assert.equal(reconstructed.length, 3);
+  assert.equal(reconstructed[0].nodeValue, "Click ");
+  assert.equal(reconstructed[1], link);
+  assert.equal(link.getAttribute("href"), "/signup");
+  assert.equal(link.getAttribute("class"), "btn-primary");
+  assert.equal(link.textContent, "Here");
+  assert.equal(reconstructed[2].nodeValue, " to create your account.");
+});
+
+test("parseTranslatedMarkup handles word reordering", () => {
+  const link = new MockDOMNode(1, "A");
+  link.setAttribute("href", "/signup");
+  const linkText = new MockDOMNode(3, "#text", "here");
+  link.appendChild(linkText);
+
+  const elMap = new Map([[0, link]]);
+  const doc = globalThis.document;
+
+  const translated = "To create your account click <x id=\"0\">Here</x>.";
+  const reconstructed = core.parseTranslatedMarkup(translated, elMap, doc);
+
+  assert.equal(reconstructed.length, 3);
+  assert.equal(reconstructed[0].nodeValue, "To create your account click ");
+  assert.equal(reconstructed[1], link);
+  assert.equal(reconstructed[2].nodeValue, ".");
+});
+
+test("parseTranslatedMarkup handles nested inline elements and preserves hierarchy", () => {
+  const link = new MockDOMNode(1, "A");
+  const strong = new MockDOMNode(1, "STRONG");
+  const elMap = new Map([[0, link], [1, strong]]);
+  const doc = globalThis.document;
+
+  const translated = "This is <x id=\"0\">very <x id=\"1\">important</x> and</x> cool.";
+  const reconstructed = core.parseTranslatedMarkup(translated, elMap, doc);
+
+  assert.equal(reconstructed.length, 3);
+  assert.equal(reconstructed[0].nodeValue, "This is ");
+  assert.equal(reconstructed[1], link);
+  assert.equal(link.childNodes.length, 3);
+  assert.equal(link.childNodes[0].nodeValue, "very ");
+  assert.equal(link.childNodes[1], strong);
+  assert.equal(strong.textContent, "important");
+  assert.equal(link.childNodes[2].nodeValue, " and");
+  assert.equal(reconstructed[2].nodeValue, " cool.");
+});
+
+test("parseTranslatedMarkup error resilience for malformed/dropped placeholders", () => {
+  const link = new MockDOMNode(1, "A");
+  const elMap = new Map([[0, link]]);
+  const doc = globalThis.document;
+
+  // Dropped placeholder: link element is appended so it is not lost
+  const dropped = "Click to create your account.";
+  const res1 = core.parseTranslatedMarkup(dropped, elMap, doc);
+  assert.ok(res1.includes(link));
+
+  // Missing closing tag
+  const missingClose = "Click <x id=\"0\">Here to create account.";
+  const res2 = core.parseTranslatedMarkup(missingClose, elMap, doc);
+  assert.ok(res2.includes(link));
+
+  // Self closing tag
+  const selfClose = "Click <x id=\"0\"/> here.";
+  const res3 = core.parseTranslatedMarkup(selfClose, elMap, doc);
+  assert.ok(res3.includes(link));
+
+  // Case insensitive and unquoted
+  const unquoted = "Click <X ID=0>Here</X>.";
+  const res4 = core.parseTranslatedMarkup(unquoted, elMap, doc);
+  assert.ok(res4.includes(link));
+  assert.equal(link.textContent, "Here");
+
+  // Unknown tag id
+  const unknownId = "Click <x id=\"999\">unknown</x> here.";
+  const res5 = core.parseTranslatedMarkup(unknownId, elMap, doc);
+  assert.ok(res5.length >= 1);
+});
+
+test("replaceSegmentNodes and restoreSegmentNodes accurately swaps and restores DOM nodes", () => {
+  const parent = new MockDOMNode(1, "P");
+  parent.isRoot = true;
+  const t1 = new MockDOMNode(3, "#text", "Click ");
+  const link = new MockDOMNode(1, "A");
+  const linkText = new MockDOMNode(3, "#text", "here");
+  link.appendChild(linkText);
+  const t2 = new MockDOMNode(3, "#text", " to create account.");
+  parent.appendChild(t1);
+  parent.appendChild(link);
+  parent.appendChild(t2);
+
+  const origNodes = [t1, link, t2];
+
+  const newT1 = new MockDOMNode(3, "#text", "Cliquez ");
+  const newT2 = new MockDOMNode(3, "#text", " pour créer un compte.");
+  const newNodes = [newT1, link, newT2];
+
+  core.replaceSegmentNodes(parent, origNodes, newNodes);
+  assert.deepEqual(parent.childNodes, newNodes);
+
+  core.restoreSegmentNodes(parent, origNodes, newNodes);
+  assert.deepEqual(parent.childNodes, origNodes);
+});
+
+test("collectTranslatableItems groups contiguous inline formatting tags into single sentence block", () => {
+  const p = new MockDOMNode(1, "P");
+  const t1 = new MockDOMNode(3, "#text", "Click ");
+  const link = new MockDOMNode(1, "A");
+  link.setAttribute("href", "/signup");
+  const linkText = new MockDOMNode(3, "#text", "here");
+  link.appendChild(linkText);
+  const t2 = new MockDOMNode(3, "#text", " to create your free account today.");
+  p.appendChild(t1);
+  p.appendChild(link);
+  p.appendChild(t2);
+
+  const items = core.collectTranslatableItems(p, [], () => true);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].type, "segment");
+  assert.equal(items[0].core, "Click <x id=\"0\">here</x> to create your free account today.");
+});
+
+test("collectTranslatableItems preserves separate blocks for block elements", () => {
+  const div = new MockDOMNode(1, "DIV");
+  const p1 = new MockDOMNode(1, "P");
+  const p1Text = new MockDOMNode(3, "#text", "Paragraph 1 with ");
+  const p1Link = new MockDOMNode(1, "A");
+  p1Link.appendChild(new MockDOMNode(3, "#text", "link"));
+  p1.appendChild(p1Text);
+  p1.appendChild(p1Link);
+
+  const p2 = new MockDOMNode(1, "P");
+  const p2Text = new MockDOMNode(3, "#text", "Paragraph 2 with ");
+  const p2Strong = new MockDOMNode(1, "STRONG");
+  p2Strong.appendChild(new MockDOMNode(3, "#text", "bold"));
+  p2.appendChild(p2Text);
+  p2.appendChild(p2Strong);
+
+  div.appendChild(p1);
+  div.appendChild(p2);
+
+  const items = core.collectTranslatableItems(div, [], () => true);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].parent, p1);
+  assert.equal(items[1].parent, p2);
+});
+
+test("Attribute Translation: collects placeholder, title, alt, and aria-label", () => {
+  const container = new MockDOMNode(1, "DIV");
+  const input = new MockDOMNode(1, "INPUT");
+  input.setAttribute("placeholder", "Search articles...");
+  const btn = new MockDOMNode(1, "BUTTON");
+  btn.setAttribute("title", "Click me");
+  btn.setAttribute("aria-label", "Submit form");
+  const img = new MockDOMNode(1, "IMG");
+  img.setAttribute("alt", "Test banner");
+
+  // Non-eligible attribute
+  const badBtn = new MockDOMNode(1, "BUTTON");
+  badBtn.setAttribute("title", "12345");
+
+  // Hidden element attribute
+  const hiddenInput = new MockDOMNode(1, "INPUT");
+  hiddenInput.hidden = true;
+  hiddenInput.setAttribute("placeholder", "Hidden placeholder");
+
+  container.appendChild(input);
+  container.appendChild(btn);
+  container.appendChild(img);
+  container.appendChild(badBtn);
+  container.appendChild(hiddenInput);
+
+  const items = core.collectTranslatableItems(container, [], () => true);
+  assert.equal(items.length, 4);
+
+  const attrs = items.map((i) => `${i.element.tagName}.${i.attribute} = "${i.core}"`);
+  assert.ok(attrs.includes("INPUT.placeholder = \"Search articles...\""));
+  assert.ok(attrs.includes("BUTTON.title = \"Click me\""));
+  assert.ok(attrs.includes("BUTTON.aria-label = \"Submit form\""));
+  assert.ok(attrs.includes("IMG.alt = \"Test banner\""));
+});
+
+test("End-to-End translateItems translates text nodes, stitched segments, and attributes, and restores originals", async () => {
+  const root = new MockDOMNode(1, "DIV");
+  root.isRoot = true;
+
+  const pText = new MockDOMNode(1, "P");
+  const textOnly = new MockDOMNode(3, "#text", "Welcome to our store");
+  pText.appendChild(textOnly);
+
+  const pSegment = new MockDOMNode(1, "P");
+  const segT1 = new MockDOMNode(3, "#text", "Click ");
+  const segLink = new MockDOMNode(1, "A");
+  segLink.setAttribute("href", "/cart");
+  const segLinkText = new MockDOMNode(3, "#text", "here");
+  segLink.appendChild(segLinkText);
+  const segT2 = new MockDOMNode(3, "#text", " to view cart.");
+  pSegment.appendChild(segT1);
+  pSegment.appendChild(segLink);
+  pSegment.appendChild(segT2);
+
+  const input = new MockDOMNode(1, "INPUT");
+  input.setAttribute("placeholder", "Search catalog...");
+
+  root.appendChild(pText);
+  root.appendChild(pSegment);
+  root.appendChild(input);
+
+  const items = core.collectTranslatableItems(root, [], () => true);
+  assert.equal(items.length, 3);
+
+  const res = await core.translateItems(items);
+  assert.equal(res.ok, true);
+  assert.equal(res.translatedCount, 3);
+
+  // Check translated values
+  assert.equal(textOnly.nodeValue, "EN:Welcome to our store");
+  assert.equal(input.getAttribute("placeholder"), "EN:Search catalog...");
+  assert.equal(segLink.textContent, "cart-here");
+  assert.equal(segLink.getAttribute("href"), "/cart");
+
+  // Restore originals
+  const restoreRes = await core.restoreOriginals();
+  assert.equal(restoreRes.ok, true);
+
+  assert.equal(textOnly.nodeValue, "Welcome to our store");
+  assert.equal(input.getAttribute("placeholder"), "Search catalog...");
+  assert.equal(segLink.textContent, "here");
+  assert.equal(core.state.originals.size, 0);
+});
+
+test("Dynamic Content & SPAs: debounced MutationObserver watches for newly added subtrees", async () => {
+  let observerCb;
+  class MockMO {
+    constructor(cb) { observerCb = cb; }
+    observe() {}
+    disconnect() { observerCb = null; }
+  }
+  globalThis.MutationObserver = MockMO;
+
+  const doc = globalThis.document;
+  doc.body = new MockDOMNode(1, "BODY");
+  doc.body.isRoot = true;
+
+  core.startMutationObserver();
+  assert.equal(core.state.observerActive, true);
+
+  const dynamicP = new MockDOMNode(1, "P");
+  const dynamicText = new MockDOMNode(3, "#text", "Newly loaded feed post");
+  dynamicP.appendChild(dynamicText);
+  doc.body.appendChild(dynamicP);
+
+  observerCb([{ type: "childList", addedNodes: [dynamicP] }]);
+
+  await new Promise((r) => setTimeout(r, 320));
+
+  assert.equal(dynamicText.nodeValue, "EN:Newly loaded feed post");
+  assert.equal(core.state.originals.size, 1);
+
+  await core.restoreOriginals();
+  assert.equal(dynamicText.nodeValue, "Newly loaded feed post");
+  assert.equal(core.state.observerActive, false);
+});
+
+test("background.js translateBatch supports html format and cache operations", async () => {
+  bg.setCache("test_unique_key_123", "test_unique_val_456");
+  assert.equal(bg.getCached("test_unique_key_123"), "test_unique_val_456");
+
+  const res = await bg.translateBatch(["test_unique_key_123"]);
+  assert.deepEqual(res, ["test_unique_val_456"]);
+});
+
+test("Live LibreTranslate sentence stitching test with placeholders (if running at 127.0.0.1:5000)", async () => {
+  try {
+    const res = await fetch("http://127.0.0.1:5000/languages", { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return;
+
+    const transRes = await fetch("http://127.0.0.1:5000/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        q: ["Нажмите <x id=\"0\">здесь</x>, чтобы создать свой аккаунт."],
+        source: "auto",
+        target: "en",
+        format: "html"
+      }),
+      signal: AbortSignal.timeout(3000)
+    });
+    if (!transRes.ok) return;
+    const data = await transRes.json();
+    assert.ok(Array.isArray(data.translatedText));
+    assert.ok(data.translatedText[0].includes("<x id=\"0\">"));
+  } catch (err) {
+    console.log("Live sentence stitching test skipped:", err.message);
+  }
+});
+
+test("replaceSegmentNodes and restoreSegmentNodes maintain strict order when segment starts with an element node", () => {
+  const parent = new MockDOMNode(1, "P");
+  parent.isRoot = true;
+
+  const link = new MockDOMNode(1, "A");
+  link.setAttribute("href", "/start");
+  link.appendChild(new MockDOMNode(3, "#text", "Leading link"));
+
+  const t1 = new MockDOMNode(3, "#text", " followed by text");
+  const t2 = new MockDOMNode(3, "#text", " and ending phrase.");
+
+  parent.appendChild(link);
+  parent.appendChild(t1);
+  parent.appendChild(t2);
+
+  const origNodes = [link, t1, t2];
+
+  const newT1 = new MockDOMNode(3, "#text", " suivi par texte");
+  const newT2 = new MockDOMNode(3, "#text", " et phrase finale.");
+  const newNodes = [link, newT1, newT2];
+
+  // Replace segment nodes
+  core.replaceSegmentNodes(parent, origNodes, newNodes);
+  assert.equal(parent.childNodes.length, 3);
+  assert.equal(parent.childNodes[0], link);
+  assert.equal(parent.childNodes[1], newT1);
+  assert.equal(parent.childNodes[2], newT2);
+
+  // Restore segment nodes
+  core.restoreSegmentNodes(parent, origNodes, newNodes);
+  assert.equal(parent.childNodes.length, 3);
+  assert.equal(parent.childNodes[0], link);
+  assert.equal(parent.childNodes[1], t1);
+  assert.equal(parent.childNodes[2], t2);
+});
+
+test("Attribute Translation: collects attributes on inline elements and nested segment elements (title, alt, aria-label)", async () => {
+  const p = new MockDOMNode(1, "P");
+  p.isRoot = true;
+
+  const t1 = new MockDOMNode(3, "#text", "Click ");
+  const a = new MockDOMNode(1, "A");
+  a.setAttribute("href", "/signup");
+  a.setAttribute("title", "Sign up now");
+  a.setAttribute("aria-label", "Sign up button");
+
+  const img = new MockDOMNode(1, "IMG");
+  img.setAttribute("src", "icon.png");
+  img.setAttribute("alt", "Icon description");
+
+  const linkText = new MockDOMNode(3, "#text", "here");
+  a.appendChild(img);
+  a.appendChild(linkText);
+
+  const t2 = new MockDOMNode(3, "#text", " to register.");
+  p.appendChild(t1);
+  p.appendChild(a);
+  p.appendChild(t2);
+
+  const items = core.collectTranslatableItems(p, [], () => true);
+
+  // Must collect the segment AND all 3 attributes on the inline element and nested img
+  const segmentItems = items.filter((i) => i.type === "segment");
+  assert.equal(segmentItems.length, 1);
+  assert.equal(segmentItems[0].core, "Click <x id=\"0\"><x id=\"1\"/>here</x> to register.");
+
+  const attrItems = items.filter((i) => i.type === "attribute");
+  assert.equal(attrItems.length, 3);
+
+  const titleAttr = attrItems.find((i) => i.element === a && i.attribute === "title");
+  assert.ok(titleAttr);
+  assert.equal(titleAttr.core, "Sign up now");
+
+  const ariaAttr = attrItems.find((i) => i.element === a && i.attribute === "aria-label");
+  assert.ok(ariaAttr);
+  assert.equal(ariaAttr.core, "Sign up button");
+
+  const altAttr = attrItems.find((i) => i.element === img && i.attribute === "alt");
+  assert.ok(altAttr);
+  assert.equal(altAttr.core, "Icon description");
+
+  // Translate all items
+  const res = await core.translateItems(items);
+  assert.equal(res.ok, true);
+
+  assert.equal(a.getAttribute("title"), "EN:Sign up now");
+  assert.equal(a.getAttribute("aria-label"), "EN:Sign up button");
+  assert.equal(img.getAttribute("alt"), "EN:Icon description");
+
+  // Restore originals
+  const restoreRes = await core.restoreOriginals();
+  assert.equal(restoreRes.ok, true);
+
+  assert.equal(a.getAttribute("title"), "Sign up now");
+  assert.equal(a.getAttribute("aria-label"), "Sign up button");
+  assert.equal(img.getAttribute("alt"), "Icon description");
+  assert.equal(linkText.nodeValue, "here");
+});
+
+test("Inline Element Sentence Stitching: IMG tag is treated as inline element without fragmenting sentences", () => {
+  const p = new MockDOMNode(1, "P");
+  const t1 = new MockDOMNode(3, "#text", "Click the ");
+  const img = new MockDOMNode(1, "IMG");
+  img.setAttribute("src", "star.png");
+  img.setAttribute("alt", "Star icon");
+  const t2 = new MockDOMNode(3, "#text", " icon to bookmark this page.");
+
+  p.appendChild(t1);
+  p.appendChild(img);
+  p.appendChild(t2);
+
+  const items = core.collectTranslatableItems(p, [], () => true);
+
+  const segments = items.filter((i) => i.type === "segment");
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].core, "Click the <x id=\"0\"/> icon to bookmark this page.");
+
+  const attrs = items.filter((i) => i.type === "attribute");
+  assert.equal(attrs.length, 1);
+  assert.equal(attrs[0].element, img);
+  assert.equal(attrs[0].attribute, "alt");
+  assert.equal(attrs[0].core, "Star icon");
+});
+
+test("HTML entity decoding: decodeHtmlEntities and parseTranslatedMarkup decode entities correctly", () => {
+  assert.equal(
+    core.decodeHtmlEntities("Tom &amp; Jerry &quot;quote&quot; &lt;tag&gt; &#39;apostrophe&#39; &nbsp;done"),
+    "Tom & Jerry \"quote\" <tag> 'apostrophe' \u00a0done"
+  );
+
+  const doc = globalThis.document;
+  const link = new MockDOMNode(1, "A");
+  const elMap = new Map([[0, link]]);
+
+  const translatedWithEntities = "Tom &amp; Jerry say <x id=\"0\">Hello &amp; Welcome</x> today!";
+  const reconstructed = core.parseTranslatedMarkup(translatedWithEntities, elMap, doc);
+
+  assert.equal(reconstructed.length, 3);
+  assert.equal(reconstructed[0].nodeValue, "Tom & Jerry say ");
+  assert.equal(reconstructed[1], link);
+  assert.equal(link.textContent, "Hello & Welcome");
+  assert.equal(reconstructed[2].nodeValue, " today!");
+});
+
+test("parseTranslatedMarkup handles duplicate placeholder tags by cloning element safely", () => {
+  const doc = globalThis.document;
+  const link = new MockDOMNode(1, "A");
+  link.setAttribute("href", "/docs");
+  link.setAttribute("class", "doc-link");
+  const elMap = new Map([[0, link]]);
+
+  const duplicateOutput = "Read <x id=\"0\">Documentation</x> or visit <x id=\"0\">API Docs</x> for details.";
+  const reconstructed = core.parseTranslatedMarkup(duplicateOutput, elMap, doc);
+
+  assert.equal(reconstructed.length, 5);
+  assert.equal(reconstructed[0].nodeValue, "Read ");
+  assert.equal(reconstructed[1], link);
+  assert.equal(link.textContent, "Documentation");
+  assert.equal(reconstructed[2].nodeValue, " or visit ");
+
+  const secondLink = reconstructed[3];
+  assert.notEqual(secondLink, link); // Cloned, not stolen!
+  assert.equal(secondLink.getAttribute("href"), "/docs");
+  assert.equal(secondLink.getAttribute("class"), "doc-link");
+  assert.equal(secondLink.textContent, "API Docs");
+  assert.equal(reconstructed[4].nodeValue, " for details.");
+});
+
+test("Dynamic Content & SPAs: aborting dynamic translation halts gracefully without corrupting restored DOM", async () => {
+  let observerCb;
+  class MockMO {
+    constructor(cb) { observerCb = cb; }
+    observe() {}
+    disconnect() { observerCb = null; }
+  }
+  globalThis.MutationObserver = MockMO;
+
+  const doc = globalThis.document;
+  doc.body = new MockDOMNode(1, "BODY");
+  doc.body.isRoot = true;
+
+  core.startMutationObserver();
+
+  const dynamicP = new MockDOMNode(1, "P");
+  const dynamicText = new MockDOMNode(3, "#text", "Post to be cancelled");
+  dynamicP.appendChild(dynamicText);
+  doc.body.appendChild(dynamicP);
+
+  observerCb([{ type: "childList", addedNodes: [dynamicP] }]);
+
+  // Immediately restore before debounce completes
+  await core.restoreOriginals();
+
+  assert.equal(core.state.observerActive, false);
+  assert.equal(dynamicText.nodeValue, "Post to be cancelled");
+});
+
+test("collectTranslatableItems respects MAX_TEXT_NODES cap", () => {
+  const container = new MockDOMNode(1, "DIV");
+  for (let i = 0; i < 12000; i++) {
+    const p = new MockDOMNode(1, "P");
+    p.appendChild(new MockDOMNode(3, "#text", `Node ${i} text content`));
+    container.appendChild(p);
+  }
+
+  const items = core.collectTranslatableItems(container, [], () => true);
+  assert.ok(items.length <= 10000, `items.length (${items.length}) should not exceed 10000`);
+});

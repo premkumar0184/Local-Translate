@@ -22,7 +22,7 @@ function setCache(text, val) {
   translationCache.set(text, val);
 }
 
-async function requestTranslation(texts) {
+async function requestTranslation(texts, format = "html") {
   let response;
   try {
     response = await fetch(`${API_BASE}/translate`, {
@@ -32,7 +32,7 @@ async function requestTranslation(texts) {
         q: texts,
         source: "auto",
         target: "en",
-        format: "text"
+        format: format || "html"
       }),
       signal: AbortSignal.timeout(150000)
     });
@@ -65,7 +65,7 @@ async function requestTranslation(texts) {
   throw new Error("LibreTranslate returned an unexpected batch response structure.");
 }
 
-async function translateBatch(texts) {
+async function translateBatch(texts, format = "html") {
   if (!Array.isArray(texts) || texts.length === 0) return [];
 
   const results = new Array(texts.length);
@@ -107,7 +107,7 @@ async function translateBatch(texts) {
     }
 
     try {
-      const translated = await requestTranslation(uniqueUncached);
+      const translated = await requestTranslation(uniqueUncached, format);
       for (let j = 0; j < uniqueUncached.length; j++) {
         const orig = uniqueUncached[j];
         const trans = translated[j];
@@ -137,23 +137,38 @@ async function translateBatch(texts) {
   return results;
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.action === "translateBatch") {
-    translateBatch(message.texts)
-      .then((translations) => sendResponse({ ok: true, translations }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-});
+if (typeof chrome !== "undefined" && chrome?.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.action === "translateBatch") {
+      translateBatch(message.texts, message.format || "html")
+        .then((translations) => sendResponse({ ok: true, translations }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+  });
+}
 
-chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== "translate-page") return;
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (!tab?.id) return;
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
-    await chrome.tabs.sendMessage(tab.id, { action: "translatePage" });
-  } catch (error) {
-    console.warn("Could not translate this tab:", error);
-  }
-});
+if (typeof chrome !== "undefined" && chrome?.commands?.onCommand) {
+  chrome.commands.onCommand.addListener(async (command) => {
+    if (command !== "translate-page") return;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!tab?.id) return;
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+      await chrome.tabs.sendMessage(tab.id, { action: "translatePage" });
+    } catch (error) {
+      console.warn("Could not translate this tab:", error);
+    }
+  });
+}
+
+globalThis.__heliumBackground = {
+  API_BASE,
+  CACHE_MAX,
+  translationCache,
+  inFlight,
+  getCached,
+  setCache,
+  requestTranslation,
+  translateBatch
+};
