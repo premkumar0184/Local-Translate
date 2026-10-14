@@ -10,9 +10,9 @@
 [![Tested on Chromium](https://img.shields.io/badge/Chromium-All%20Browsers-success.svg)](#part-2-browser-installation-guide)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local%20%7C%20Zero%20Telemetry-brightgreen.svg)](#privacy--security-guarantee)
-[![Tests Passing](https://img.shields.io/badge/Tests-46%2F46%20Passing-brightgreen.svg)](#automated-test-suite)
+[![Tests Passing](https://img.shields.io/badge/Tests-50%2F50%20Passing-brightgreen.svg)](#automated-test-suite)
 
-[Features](#key-features) • [Engine Deep Dive](#deep-dive-advanced-engine-capabilities) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Tests (46 Passing)](#automated-test-suite) • [Troubleshooting](#part-4-troubleshooting--faq)
+[Features](#key-features) • [Engine Deep Dive](#deep-dive-advanced-engine-capabilities) • [Quick Start](#quick-start-30-second-overview) • [LibreTranslate Setup](#part-1-setting-up-libretranslate-local-server) • [Browser Install](#part-2-browser-installation-guide) • [Tests (50 Passing)](#automated-test-suite) • [Troubleshooting](#part-4-troubleshooting--faq)
 
 </div>
 
@@ -676,7 +676,7 @@ The repository includes a comprehensive standalone Node.js test suite with zero 
 npm test
 ```
 
-### What the Test Suite Verifies (46 Tests):
+### What the Test Suite Verifies (50 Tests):
 
 #### 1. Core String Sanitization & Unicode Heuristics (3 Tests)
 - `splitWhitespace`: Accurate Unicode whitespace extraction, preserving leading and trailing spaces around core translatable text.
@@ -734,13 +734,17 @@ npm test
 - `Branding consistency across files`: Verifies "Libre Local Translator" naming across `manifest.json`, `package.json`, `popup.html`, and `README.md`.
 - `Hardware storage fallback`: Verifies asynchronous fallback loading from `chrome.storage.local` when no payload is passed to `translatePage`.
 
-#### 9. Native Context Menu & Permissions (6 Tests)
+#### 9. Native Context Menu & Permissions (10 Tests)
 - `manifest.json contextMenus permission`: Verifies `contextMenus` permission is declared in `manifest.json`.
 - `Context menu registration`: Verifies `chrome.runtime.onInstalled` registers "Translate to English" with id `translate-to-english` and contexts `["page", "selection"]`.
 - `Context menu click handling`: Verifies `chrome.contextMenus.onClicked` triggers `translatePage` workflow on the active tab with saved hardware tuning settings.
 - `Shortcut workflow reuse`: Verifies `chrome.commands.onCommand` shares the unified `translateTab` workflow.
 - `Error isolation & missing tabs`: Handles missing tabs, uninjectable restricted pages, and storage errors without unhandled exceptions.
 - `Cancellation & busy state respect`: Ensures right-click triggers properly respect existing active translation state and previous translation restorations.
+- `Tab ID validation`: Rejects negative (`TAB_ID_NONE = -1`), zero, or non-integer tab IDs and falls back to active window tab query.
+- `Restricted URL protection`: Proactively rejects internal and restricted browser URLs (`chrome://`, `https://chromewebstore.google.com`) without unhandled script injection errors.
+- `Context menu refresh with removeAll`: Clears stale menu registrations before re-creating context menu items upon extension reload/update.
+- `End-to-End context menu dispatch`: Fully wires context menu click handler to `content.js` listener, validating real settings delivery, busy state rejection, and clean restoration.
 
 
 <a id="privacy-security-guarantee"></a>

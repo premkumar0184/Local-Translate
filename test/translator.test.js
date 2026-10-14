@@ -1660,3 +1660,182 @@ test("Context menu translation respects existing cancellation and busy state in 
   assert.equal(core.state.originals.size, 0);
 });
 
+test("isValidTabId and getTargetTab reject negative, zero, or non-integer tab IDs", async () => {
+  assert.equal(bg.isValidTabId(1), true);
+  assert.equal(bg.isValidTabId(42), true);
+  assert.equal(bg.isValidTabId(-1), false);
+  assert.equal(bg.isValidTabId(0), false);
+  assert.equal(bg.isValidTabId("123"), false);
+  assert.equal(bg.isValidTabId(null), false);
+  assert.equal(bg.isValidTabId(undefined), false);
+  assert.equal(bg.isValidTabId(1.5), false);
+
+  const originalChrome = globalThis.chrome;
+  globalThis.chrome = {
+    ...originalChrome,
+    tabs: {
+      query: async () => [{ id: 88, url: "https://example.com" }]
+    }
+  };
+
+  try {
+    const validTarget = await bg.getTargetTab({ id: 99 });
+    assert.equal(validTarget.id, 99);
+
+    // Negative ID (such as TAB_ID_NONE = -1) falls back to querying active tab
+    const negTarget = await bg.getTargetTab({ id: -1 });
+    assert.equal(negTarget.id, 88);
+
+    // Zero or non-integer falls back to querying active tab
+    const zeroTarget = await bg.getTargetTab({ id: 0 });
+    assert.equal(zeroTarget.id, 88);
+
+    // When query returns invalid tab, returns null
+    globalThis.chrome.tabs.query = async () => [{ id: -1 }];
+    const invalidQueryTarget = await bg.getTargetTab({ id: -1 });
+    assert.equal(invalidQueryTarget, null);
+  } finally {
+    globalThis.chrome = originalChrome;
+  }
+});
+
+test("background.js translateTab rejects restricted browser URLs without script execution", async () => {
+  const originalChrome = globalThis.chrome;
+  let scriptExecuted = false;
+
+  globalThis.chrome = {
+    ...originalChrome,
+    scripting: {
+      executeScript: async () => {
+        scriptExecuted = true;
+      }
+    },
+    tabs: {
+      query: async () => [{ id: 10, url: "chrome://settings" }],
+      sendMessage: async () => ({ ok: true })
+    }
+  };
+
+  try {
+    // 1. Direct tab with chrome:// URL
+    const res1 = await bg.translateTab({ id: 10, url: "chrome://extensions" });
+    assert.equal(res1, null);
+    assert.equal(scriptExecuted, false);
+
+    // 2. Direct tab with Web Store URL
+    const res2 = await bg.translateTab({ id: 11, url: "https://chromewebstore.google.com/detail/123" });
+    assert.equal(res2, null);
+    assert.equal(scriptExecuted, false);
+
+    // 3. Fallback to active tab with restricted URL
+    const res3 = await bg.translateTab();
+    assert.equal(res3, null);
+    assert.equal(scriptExecuted, false);
+
+    // 4. Allowed URL proceeds to execution
+    const res4 = await bg.translateTab({ id: 12, url: "https://example.com" });
+    assert.equal(scriptExecuted, true);
+  } finally {
+    globalThis.chrome = originalChrome;
+  }
+});
+
+test("background.js setupContextMenu calls removeAll when available to refresh context menu items", () => {
+  const originalContextMenus = globalThis.chrome.contextMenus;
+  let removeAllCalled = false;
+  let createdMenu = null;
+
+  globalThis.chrome.contextMenus = {
+    removeAll: (cb) => {
+      removeAllCalled = true;
+      if (typeof cb === "function") cb();
+    },
+    create: (props, cb) => {
+      createdMenu = props;
+      if (typeof cb === "function") cb();
+    }
+  };
+
+  try {
+    bg.setupContextMenu();
+    assert.equal(removeAllCalled, true, "chrome.contextMenus.removeAll must be called before create");
+    assert.ok(createdMenu, "chrome.contextMenus.create must be called after removeAll");
+    assert.equal(createdMenu.id, "translate-to-english");
+    assert.equal(createdMenu.title, "Translate to English");
+  } finally {
+    globalThis.chrome.contextMenus = originalContextMenus;
+  }
+});
+
+test("End-to-End: handleContextMenuClick dispatches to content.js onMessage and respects busy/restoration states", async () => {
+  const doc = globalThis.document;
+  doc.body = new MockDOMNode(1, "BODY");
+  doc.body.isRoot = true;
+
+  const p = new MockDOMNode(1, "P");
+  p.appendChild(new MockDOMNode(3, "#text", "Bonjour tout le monde"));
+  doc.body.appendChild(p);
+
+  const originalChrome = globalThis.chrome;
+  let scriptInjected = false;
+
+  // Wire chrome.tabs.sendMessage directly to content.js runtime.onMessage listener
+  globalThis.chrome = {
+    ...originalChrome,
+    scripting: {
+      executeScript: async () => {
+        scriptInjected = true;
+      }
+    },
+    tabs: {
+      sendMessage: async (tabId, msg) => {
+        if (msg.action === "translatePage") {
+          return await core.translatePage(msg.settings);
+        }
+        return { ok: false };
+      }
+    },
+    storage: {
+      local: {
+        get: async () => ({
+          translatorSettings: { preset: "cpu-tuned", threads: 8, batchSize: 100 }
+        })
+      }
+    }
+  };
+
+  try {
+    core.state.busy = false;
+    core.state.originals.clear();
+
+    const clickInfo = { menuItemId: "translate-to-english" };
+    const mockTab = { id: 70, url: "https://example.com/french-article" };
+
+    // 1. First translation via right-click context menu
+    const result1 = await bg.handleContextMenuClick(clickInfo, mockTab);
+    assert.equal(scriptInjected, true);
+    assert.equal(result1.ok, true);
+    assert.equal(p.childNodes[0].nodeValue, "EN:Bonjour tout le monde");
+    assert.equal(core.state.settings.preset, "cpu-tuned");
+
+    // 2. Click while already busy respects busy state
+    core.state.busy = true;
+    const resultBusy = await bg.handleContextMenuClick(clickInfo, mockTab);
+    assert.equal(resultBusy.ok, false);
+    assert.equal(resultBusy.error, "A translation is already running.");
+    core.state.busy = false;
+
+    // 3. Repeated right-click context menu invocation restores and re-translates cleanly
+    const result2 = await bg.handleContextMenuClick(clickInfo, mockTab);
+    assert.equal(result2.ok, true);
+    assert.equal(p.childNodes[0].nodeValue, "EN:Bonjour tout le monde");
+
+    // 4. Restore original restores DOM
+    await core.restoreOriginals();
+    assert.equal(p.childNodes[0].nodeValue, "Bonjour tout le monde");
+    assert.equal(core.state.originals.size, 0);
+  } finally {
+    globalThis.chrome = originalChrome;
+  }
+});
+

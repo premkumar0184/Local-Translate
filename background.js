@@ -150,20 +150,61 @@ if (typeof chrome !== "undefined" && chrome?.runtime?.onMessage) {
 
 const CONTEXT_MENU_ID = "translate-to-english";
 
-function setupContextMenu() {
-  if (typeof chrome === "undefined" || !chrome?.contextMenus?.create) return;
+function isRestrictedUrl(url) {
+  if (!url) return false;
+  const restrictedProtocols = [
+    "chrome:", "edge:", "brave:", "opera:", "vivaldi:", "about:",
+    "chrome-extension:", "devtools:", "view-source:", "data:"
+  ];
+  return (
+    restrictedProtocols.some((proto) => url.startsWith(proto)) ||
+    url.startsWith("https://chromewebstore.google.com") ||
+    url.startsWith("https://microsoftedge.microsoft.com/addons")
+  );
+}
+
+function isValidTabId(id) {
+  return typeof id === "number" && Number.isInteger(id) && id > 0;
+}
+
+function setupContextMenu(callback) {
+  if (typeof chrome === "undefined" || !chrome?.contextMenus?.create) {
+    if (typeof callback === "function") callback();
+    return;
+  }
+
+  const createItem = () => {
+    try {
+      chrome.contextMenus.create({
+        id: CONTEXT_MENU_ID,
+        title: "Translate to English",
+        contexts: ["page", "selection"]
+      }, () => {
+        if (chrome.runtime?.lastError) {
+          // Suppress unchecked runtime.lastError if item already exists upon reload
+        }
+        if (typeof callback === "function") callback();
+      });
+    } catch (err) {
+      console.warn("Could not register context menu:", err);
+      if (typeof callback === "function") callback();
+    }
+  };
+
   try {
-    chrome.contextMenus.create({
-      id: CONTEXT_MENU_ID,
-      title: "Translate to English",
-      contexts: ["page", "selection"]
-    }, () => {
-      if (chrome.runtime?.lastError) {
-        // Suppress unchecked runtime.lastError if item already exists upon reload
-      }
-    });
+    if (typeof chrome?.contextMenus?.removeAll === "function") {
+      chrome.contextMenus.removeAll(() => {
+        if (chrome.runtime?.lastError) {
+          // Suppress unchecked runtime.lastError
+        }
+        createItem();
+      });
+    } else {
+      createItem();
+    }
   } catch (err) {
-    console.warn("Could not register context menu:", err);
+    console.warn("Could not remove existing context menus:", err);
+    createItem();
   }
 }
 
@@ -180,10 +221,10 @@ async function getStoredSettings() {
 }
 
 async function getTargetTab(tab) {
-  if (tab?.id) return tab;
+  if (isValidTabId(tab?.id)) return tab;
   if (typeof chrome !== "undefined" && chrome?.tabs?.query) {
     const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    return activeTab || null;
+    return isValidTabId(activeTab?.id) ? activeTab : null;
   }
   return null;
 }
@@ -191,7 +232,8 @@ async function getTargetTab(tab) {
 async function translateTab(targetTab = null) {
   try {
     const tab = await getTargetTab(targetTab);
-    if (!tab?.id) return null;
+    if (!tab || !isValidTabId(tab.id)) return null;
+    if (tab.url && isRestrictedUrl(tab.url)) return null;
 
     if (typeof chrome !== "undefined" && chrome?.scripting?.executeScript) {
       await chrome.scripting.executeScript({
@@ -208,6 +250,7 @@ async function translateTab(targetTab = null) {
       }
       return await chrome.tabs.sendMessage(tab.id, payload);
     }
+    return null;
   } catch (error) {
     console.warn("Could not translate this tab:", error);
     return null;
@@ -244,6 +287,8 @@ globalThis.__heliumBackground = {
   setCache,
   requestTranslation,
   translateBatch,
+  isRestrictedUrl,
+  isValidTabId,
   getStoredSettings,
   getTargetTab,
   translateTab,
