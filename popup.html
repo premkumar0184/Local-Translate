@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helium Page Translator</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="translator-app">
+    <!-- Header with Branding & Server Status -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo-box" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m5 8 6 6"/>
+            <path d="m4 14 6-6 2-3"/>
+            <path d="M2 5h12"/>
+            <path d="M7 2h1"/>
+            <path d="m22 22-5-10-5 10"/>
+            <path d="M14 18h6"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 class="title">Helium Translator</h1>
+          <p class="subtitle">Local LibreTranslate → English</p>
+        </div>
+      </div>
+      <button id="server-badge" class="server-badge" type="button" aria-label="Recheck server status" title="Click to recheck server status">
+        <span class="status-dot dot-checking" id="server-dot" aria-hidden="true"></span>
+        <span id="server-status-text" class="server-text">Checking…</span>
+      </button>
+    </header>
+
+    <!-- Main Action Controls -->
+    <div class="actions">
+      <button id="translate" class="btn btn-primary" type="button">
+        <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14"/>
+          <path d="m12 5 7 7-7 7"/>
+        </svg>
+        <span id="translate-btn-text">Translate to English</span>
+      </button>
+      <button id="restore" class="btn btn-secondary" type="button">
+        <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+        </svg>
+        <span id="restore-btn-text">Restore original</span>
+      </button>
+    </div>
+
+    <!-- Active Progress Bar Section -->
+    <div id="progress-container" class="progress-container" hidden>
+      <div class="progress-bar-track">
+        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+      </div>
+      <div class="progress-meta">
+        <span id="progress-label" class="progress-label">Translating…</span>
+        <span id="progress-percent" class="progress-percent">0%</span>
+      </div>
+    </div>
+
+    <!-- Status & Information Panel -->
+    <div id="status-panel" class="status-panel" role="status" aria-live="polite">
+      <div class="status-message" id="status-message">Checking local server connection…</div>
+      <div class="stats-row" id="status-stats" hidden></div>
+    </div>
+
+    <!-- Footer with Shortcut & Privacy Guarantee -->
+    <footer class="footer">
+      <div class="footer-item">
+        <span class="footer-label">Shortcut:</span>
+        <kbd class="key-badge">Alt</kbd>
+        <span class="key-sep" aria-hidden="true">+</span>
+        <kbd class="key-badge">Shift</kbd>
+        <span class="key-sep" aria-hidden="true">+</span>
+        <kbd class="key-badge">W</kbd>
+      </div>
+      <div class="footer-item privacy-note">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <span>Local · 127.0.0.1:5000</span>
+      </div>
+    </footer>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>

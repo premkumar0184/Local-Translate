@@ -1,0 +1,60 @@
+# Operating System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# Node / NPM
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+
+# Extension packaging & builds
+dist/
+build/
+*.zip
+*.crx
+*.pem
+
+# Python & LibreTranslate local virtual environments / models
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+models/
+.argos-translate/
+local_models/
+
+# IDEs & Editors
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# Logs and environment variables
+*.log
+.env
+.env.*
+!.env.example
+
+# Temporary / Scratch files
+tmp/
+temp/
+*.tmp

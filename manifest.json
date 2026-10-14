@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Helium Local Page Translator",
+  "version": "0.3.1",
+  "description": "Translate webpage text into English using your local LibreTranslate server.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1:5000/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Translate page to English",
+    "default_popup": "popup.html"
+  },
+  "commands": {
+    "translate-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+W"
+      },
+      "description": "Translate the current page into English"
+    }
+  }
+}

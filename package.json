@@ -1,0 +1,21 @@
+{
+  "name": "helium-local-translator",
+  "version": "0.3.1",
+  "description": "High-performance Chromium Manifest V3 extension for translating webpages to English using a local LibreTranslate server.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/translator.test.js"
+  },
+  "keywords": [
+    "chromium",
+    "extension",
+    "libretranslate",
+    "offline-translation",
+    "local-ai",
+    "privacy",
+    "translation"
+  ],
+  "author": "premkumar0184",
+  "license": "MIT"
+}

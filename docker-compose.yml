@@ -1,0 +1,21 @@
+services:
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    container_name: libretranslate
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"
+    environment:
+      # Specify language codes to preload, or leave blank to load all supported models
+      - LT_LOAD_ONLY=en,zh,ja,hi,ru,de,fr,es,it,pt,ar
+      # Number of worker threads for parallel inference
+      - LT_THREADS=4
+      # Enable batch processing optimizations
+      - LT_BATCH_LIMIT=100
+    volumes:
+      - lt-local-data:/home/libretranslate/.local
+      - lt-models:/home/libretranslate/.local/share/argos-translate
+
+volumes:
+  lt-local-data:
+  lt-models:

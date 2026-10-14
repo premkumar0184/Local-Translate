@@ -1,0 +1,159 @@
+const API_BASE = "http://127.0.0.1:5000";
+const CACHE_MAX = 2000;
+const translationCache = new Map();
+const inFlight = new Map();
+
+function getCached(text) {
+  if (!translationCache.has(text)) return undefined;
+  const val = translationCache.get(text);
+  translationCache.delete(text);
+  translationCache.set(text, val);
+  return val;
+}
+
+function setCache(text, val) {
+  if (typeof val !== "string" || !val) return;
+  if (translationCache.has(text)) {
+    translationCache.delete(text);
+  } else if (translationCache.size >= CACHE_MAX) {
+    const oldestKey = translationCache.keys().next().value;
+    translationCache.delete(oldestKey);
+  }
+  translationCache.set(text, val);
+}
+
+async function requestTranslation(texts) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE}/translate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        q: texts,
+        source: "auto",
+        target: "en",
+        format: "text"
+      }),
+      signal: AbortSignal.timeout(150000)
+    });
+  } catch (err) {
+    if (err?.name === "TimeoutError") {
+      throw new Error("Translation request timed out (15s). Local LibreTranslate server may be overloaded.");
+    }
+    throw new Error("Cannot reach LibreTranslate at 127.0.0.1:5000. Please ensure the local server is running.");
+  }
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(`LibreTranslate returned an invalid response (HTTP ${response.status}).`);
+  }
+
+  if (!response.ok) {
+    throw new Error(payload?.error || `LibreTranslate request failed (HTTP ${response.status}).`);
+  }
+
+  const result = payload?.translatedText;
+  if (Array.isArray(result)) {
+    if (result.length !== texts.length) {
+      throw new Error(`LibreTranslate count mismatch (expected ${texts.length}, got ${result.length}).`);
+    }
+    return result;
+  }
+  if (typeof result === "string" && texts.length === 1) return [result];
+  throw new Error("LibreTranslate returned an unexpected batch response structure.");
+}
+
+async function translateBatch(texts) {
+  if (!Array.isArray(texts) || texts.length === 0) return [];
+
+  const results = new Array(texts.length);
+  const uncachedMap = new Map();
+  const waitingPromises = [];
+
+  for (let i = 0; i < texts.length; i++) {
+    const text = texts[i];
+    const cached = getCached(text);
+    if (cached !== undefined) {
+      results[i] = cached;
+    } else if (inFlight.has(text)) {
+      const p = inFlight.get(text).then((trans) => {
+        results[i] = trans;
+      });
+      waitingPromises.push(p);
+    } else {
+      let list = uncachedMap.get(text);
+      if (!list) {
+        list = [];
+        uncachedMap.set(text, list);
+      }
+      list.push(i);
+    }
+  }
+
+  const uniqueUncached = Array.from(uncachedMap.keys());
+  if (uniqueUncached.length > 0) {
+    const resolvers = new Map();
+    for (const key of uniqueUncached) {
+      let resolve, reject;
+      const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      promise.catch(() => {});
+      inFlight.set(key, promise);
+      resolvers.set(key, { resolve, reject });
+    }
+
+    try {
+      const translated = await requestTranslation(uniqueUncached);
+      for (let j = 0; j < uniqueUncached.length; j++) {
+        const orig = uniqueUncached[j];
+        const trans = translated[j];
+        setCache(orig, trans);
+        resolvers.get(orig)?.resolve(trans);
+        const indices = uncachedMap.get(orig);
+        for (const idx of indices) {
+          results[idx] = trans;
+        }
+      }
+    } catch (err) {
+      for (const key of uniqueUncached) {
+        resolvers.get(key)?.reject(err);
+      }
+      throw err;
+    } finally {
+      for (const key of uniqueUncached) {
+        inFlight.delete(key);
+      }
+    }
+  }
+
+  if (waitingPromises.length > 0) {
+    await Promise.all(waitingPromises);
+  }
+
+  return results;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.action === "translateBatch") {
+    translateBatch(message.texts)
+      .then((translations) => sendResponse({ ok: true, translations }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+});
+
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== "translate-page") return;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab?.id) return;
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+    await chrome.tabs.sendMessage(tab.id, { action: "translatePage" });
+  } catch (error) {
+    console.warn("Could not translate this tab:", error);
+  }
+});
