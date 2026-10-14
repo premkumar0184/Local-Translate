@@ -1,8 +1,8 @@
-# Helium Local Page Translator
+# Local Page Translator
 
 <div align="center">
 
-![Helium Local Page Translator](screenshot.png)
+![Local Page Translator](screenshot.png)
 
 **High-performance, 100% private, on-device webpage translation for Chromium browsers powered by a local LibreTranslate engine.**
 
