@@ -16,8 +16,10 @@
   if (state.installed) return;
   state.installed = true;
 
-  const BATCH_SIZE = 40;
-  const MAX_CONCURRENT_BATCHES = Math.min(6, Math.max(2, (navigator.hardwareConcurrency || 4) - 1));
+  const DEFAULT_BATCH_SIZE = 20;
+  const DEFAULT_MAX_CONCURRENCY = 2;
+  const BATCH_SIZE = DEFAULT_BATCH_SIZE;
+  const MAX_CONCURRENT_BATCHES = DEFAULT_MAX_CONCURRENCY;
   const MAX_TEXT_NODES = 10000;
 
   if (typeof chrome !== "undefined" && chrome?.storage?.local?.get) {
@@ -102,18 +104,84 @@
     );
   }
 
-  function isNodeInViewport(node) {
-    if (!node) return false;
-    const el = node.nodeType === 1 ? node : node.parentElement;
-    if (!el || typeof el.getBoundingClientRect !== "function") return false;
+  function getNodePriority(node, winHeight, winWidth) {
+    if (!node) return 3;
+    const el = node.nodeType === 1 ? node : (node.parentElement || node.parentNode);
+    if (!el) return 3;
+
+    // Direct mock property overrides for test and headless environments
+    if (typeof node.priority === "number") return node.priority;
+    if (typeof el.priority === "number") return el.priority;
+    if (node.viewport === true || el.viewport === true || node.inViewport === true || el.inViewport === true) return 1;
+
+    if (typeof el.getBoundingClientRect !== "function") return 3;
     try {
       const r = el.getBoundingClientRect();
-      const winHeight = typeof window !== "undefined" ? window.innerHeight : 1000;
-      const winWidth = typeof window !== "undefined" ? window.innerWidth : 1000;
-      return r.bottom > 0 && r.top < winHeight && r.right > 0 && r.left < winWidth;
+      const winH = winHeight || (typeof window !== "undefined" ? window.innerHeight : 1000);
+      const winW = winWidth || (typeof window !== "undefined" ? window.innerWidth : 1000);
+
+      // Priority 1: Elements currently in active viewport
+      if (r.bottom > 0 && r.top < winH && r.right > 0 && r.left < winW) {
+        return 1;
+      }
+
+      // Priority 2: Elements within 1 screen height below the viewport (prefetch buffer)
+      if (r.bottom > winH && r.top < winH * 2 && r.right > 0 && r.left < winW) {
+        return 2;
+      }
+
+      // Priority 3: The remainder of the document
+      return 3;
     } catch {
-      return false;
+      return 3;
     }
+  }
+
+  function isNodeInViewport(node) {
+    return getNodePriority(node) === 1;
+  }
+
+  function getElementProminence(node) {
+    if (!node) return 0;
+    let el = node.nodeType === 1 ? node : (node.parentElement || node.parentNode);
+    if (!el) return 0;
+
+    let score = 20;
+    let curr = el;
+    let depth = 0;
+
+    while (curr && depth < 5) {
+      const tag = curr.tagName?.toUpperCase() || "";
+      if (tag === "H1") { score = Math.max(score, 100); break; }
+      if (tag === "H2") { score = Math.max(score, 90); break; }
+      if (tag === "H3") { score = Math.max(score, 80); break; }
+      if (tag === "H4") { score = Math.max(score, 70); break; }
+      if (tag === "H5") { score = Math.max(score, 60); break; }
+      if (tag === "H6") { score = Math.max(score, 50); break; }
+      if (tag === "TITLE") { score = Math.max(score, 95); break; }
+      if (tag === "HEADER") { score = Math.max(score, 75); }
+      if (tag === "NAV") { score = Math.max(score, 70); }
+      if (tag === "P") { score = Math.max(score, 40); }
+
+      const role = curr.getAttribute?.("role")?.toLowerCase();
+      if (role === "heading") score = Math.max(score, 80);
+      if (role === "banner" || role === "navigation") score = Math.max(score, 70);
+
+      curr = curr.parentNode || curr.parentElement;
+      depth++;
+    }
+
+    if (typeof el.getBoundingClientRect === "function") {
+      try {
+        const r = el.getBoundingClientRect();
+        if (r.top >= 0 && r.top < 1000) {
+          const posBonus = Math.max(0, 20 - Math.floor(r.top / 40));
+          score += posBonus;
+        }
+      } catch {}
+    }
+
+    return score;
   }
 
   function isInlineElement(node) {
@@ -361,6 +429,24 @@
       );
     }
 
+    function getItemPriorityAndProminence(nodeOrEl) {
+      let p = 3;
+      if (typeof isNodeInViewportFn === "function") {
+        const res = isNodeInViewportFn(nodeOrEl);
+        if (typeof res === "number") {
+          p = res;
+        } else if (typeof res === "boolean") {
+          p = res ? 1 : 3;
+        } else {
+          p = getNodePriority(nodeOrEl);
+        }
+      } else {
+        p = getNodePriority(nodeOrEl);
+      }
+      const prom = getElementProminence(nodeOrEl);
+      return { priority: p, prominence: prom };
+    }
+
     function collectAttributes(el) {
       if (!el || el.nodeType !== 1) return;
       if (items.length >= MAX_TEXT_NODES) return;
@@ -378,6 +464,7 @@
           if (val && isEligibleText(val)) {
             const { leading, core, trailing } = splitWhitespace(val);
             if (core && isEligibleText(core)) {
+              const { priority, prominence } = getItemPriorityAndProminence(el);
               items.push({
                 type: "attribute",
                 element: el,
@@ -386,7 +473,9 @@
                 leading,
                 core,
                 trailing,
-                inViewport: isNodeInViewportFn(el)
+                priority,
+                prominence,
+                inViewport: priority === 1
               });
             }
           }
@@ -434,6 +523,14 @@
             const { leading, core, trailing } = splitWhitespace(maskedText);
             const humanText = core.replace(/<\/?[a-zA-Z][^>]*>/g, "");
             if (core && isEligibleText(humanText)) {
+              let segmentPriority = 3;
+              let segmentProminence = 0;
+              for (const c of run) {
+                const { priority: cp, prominence: cprom } = getItemPriorityAndProminence(c);
+                if (cp < segmentPriority) segmentPriority = cp;
+                if (cprom > segmentProminence) segmentProminence = cprom;
+              }
+
               items.push({
                 type: "segment",
                 parent: node,
@@ -445,7 +542,9 @@
                 leading,
                 core,
                 trailing,
-                inViewport: run.some((c) => isNodeInViewportFn(c))
+                priority: segmentPriority,
+                prominence: segmentProminence,
+                inViewport: segmentPriority === 1
               });
             }
           } else {
@@ -456,14 +555,18 @@
                 const text = c.nodeValue || "";
                 const { leading, core, trailing } = splitWhitespace(text);
                 if (core && isEligibleText(core)) {
+                  const { priority, prominence } = getItemPriorityAndProminence(c);
                   items.push({
                     type: "text",
                     node: c,
+                    element: node,
                     original: text,
                     leading,
                     core,
                     trailing,
-                    inViewport: isNodeInViewportFn(c)
+                    priority,
+                    prominence,
+                    inViewport: priority === 1
                   });
                 }
               }
@@ -493,14 +596,18 @@
         const text = node.nodeValue || "";
         const { leading, core, trailing } = splitWhitespace(text);
         if (core && isEligibleText(core)) {
+          const { priority, prominence } = getItemPriorityAndProminence(node);
           items.push({
             type: "text",
             node,
+            element: node.parentElement || node.parentNode,
             original: text,
             leading,
             core,
             trailing,
-            inViewport: isNodeInViewportFn(node)
+            priority,
+            prominence,
+            inViewport: priority === 1
           });
         }
       }
@@ -520,6 +627,184 @@
     }
   }
 
+  // --- Requirement: Micro Hero First Batch & Viewport Priority Queue ---
+
+  function extractHeroBatch(groups, maxHero = 8) {
+    if (!Array.isArray(groups) || groups.length === 0) {
+      return { heroBatch: [], remainingGroups: [] };
+    }
+
+    const viewportGroups = groups.filter((g) => g.priority === 1 || g.inViewport);
+    if (viewportGroups.length === 0) {
+      return { heroBatch: [], remainingGroups: [...groups] };
+    }
+
+    // Sort viewport groups by prominence descending, then domOrder ascending
+    viewportGroups.sort((a, b) => {
+      const promDiff = (b.prominence ?? 0) - (a.prominence ?? 0);
+      if (promDiff !== 0) return promDiff;
+      return (a.domOrder ?? 0) - (b.domOrder ?? 0);
+    });
+
+    const heroCount = Math.min(maxHero, viewportGroups.length);
+    const heroBatch = viewportGroups.slice(0, heroCount);
+    const heroSet = new Set(heroBatch);
+
+    const remainingGroups = groups.filter((g) => !heroSet.has(g));
+    return { heroBatch, remainingGroups };
+  }
+
+  class ActivePriorityQueue {
+    constructor(groups = [], options = {}) {
+      this.signal = options.signal || null;
+      this.priorityFn = options.priorityFn || null;
+      this.winHeight = typeof window !== "undefined" ? window.innerHeight : 1000;
+      this.winWidth = typeof window !== "undefined" ? window.innerWidth : 1000;
+
+      this.pending = [...groups];
+      this.observer = null;
+      this.scrollListener = null;
+      this.isListening = false;
+      this.scrollThrottled = false;
+
+      this.sortQueue();
+    }
+
+    hasPending() {
+      return this.pending.length > 0;
+    }
+
+    get length() {
+      return this.pending.length;
+    }
+
+    sortQueue() {
+      this.pending.sort((a, b) => {
+        const pA = a.priority ?? 3;
+        const pB = b.priority ?? 3;
+        if (pA !== pB) return pA - pB;
+
+        if (pA === 1) {
+          const promDiff = (b.prominence ?? 0) - (a.prominence ?? 0);
+          if (promDiff !== 0) return promDiff;
+        }
+        return (a.domOrder ?? 0) - (b.domOrder ?? 0);
+      });
+    }
+
+    reprioritize() {
+      if (!this.pending.length) return;
+      const winH = typeof window !== "undefined" ? window.innerHeight : this.winHeight;
+      const winW = typeof window !== "undefined" ? window.innerWidth : this.winWidth;
+
+      let changed = false;
+      for (const group of this.pending) {
+        const oldPriority = group.priority;
+        let newPriority = 3;
+
+        for (const entry of group.entries) {
+          const target = entry.element || entry.node || entry.parent;
+          let p = 3;
+          if (typeof this.priorityFn === "function") {
+            const res = this.priorityFn(target);
+            if (typeof res === "number") p = res;
+            else if (typeof res === "boolean") p = res ? 1 : 3;
+            else p = getNodePriority(target, winH, winW);
+          } else {
+            p = getNodePriority(target, winH, winW);
+          }
+          entry.priority = p;
+          if (p < newPriority) newPriority = p;
+          if (newPriority === 1) break;
+        }
+
+        if (newPriority !== oldPriority) {
+          group.priority = newPriority;
+          group.inViewport = newPriority === 1;
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        this.sortQueue();
+      }
+    }
+
+    dequeueBatch(batchSize) {
+      if (!this.pending.length) return [];
+      return this.pending.splice(0, batchSize);
+    }
+
+    attachListeners() {
+      if (this.isListening) return;
+      this.isListening = true;
+
+      if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+        this.scrollListener = () => {
+          if (this.scrollThrottled) return;
+          this.scrollThrottled = true;
+          if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(() => {
+              this.scrollThrottled = false;
+              this.reprioritize();
+            });
+          } else {
+            setTimeout(() => {
+              this.scrollThrottled = false;
+              this.reprioritize();
+            }, 30);
+          }
+        };
+        window.addEventListener("scroll", this.scrollListener, { passive: true });
+        window.addEventListener("resize", this.scrollListener, { passive: true });
+      }
+
+      if (typeof IntersectionObserver !== "undefined") {
+        try {
+          this.observer = new IntersectionObserver((entries) => {
+            let hasIntersection = false;
+            for (const entry of entries) {
+              if (entry.isIntersecting) {
+                hasIntersection = true;
+                break;
+              }
+            }
+            if (hasIntersection) {
+              this.reprioritize();
+            }
+          }, {
+            rootMargin: "0px 0px 100% 0px",
+            threshold: 0
+          });
+
+          for (const group of this.pending) {
+            for (const entry of group.entries) {
+              const el = entry.element || (entry.node?.nodeType === 1 ? entry.node : (entry.node?.parentElement || entry.node?.parentNode));
+              if (el && el.nodeType === 1 && typeof this.observer.observe === "function") {
+                this.observer.observe(el);
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    detachListeners() {
+      this.isListening = false;
+      if (this.scrollListener && typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+        window.removeEventListener("scroll", this.scrollListener);
+        window.removeEventListener("resize", this.scrollListener);
+        this.scrollListener = null;
+      }
+      if (this.observer) {
+        if (typeof this.observer.disconnect === "function") {
+          this.observer.disconnect();
+        }
+        this.observer = null;
+      }
+    }
+  }
+
   // --- Translation Pipeline ---
 
   async function translateItems(items, options = {}) {
@@ -528,23 +813,39 @@
       state.settings = options.settings;
     }
     const tuning = options.settings || state.settings;
-    const activeBatchSize = Math.max(1, Math.min(500, Number(tuning?.batchSize) || BATCH_SIZE));
-    const activeThreads = Math.max(1, Math.min(32, Number(tuning?.threads) || MAX_CONCURRENT_BATCHES));
+    const activeBatchSize = Math.max(1, Math.min(500, Number(tuning?.batchSize) || DEFAULT_BATCH_SIZE));
+    const activeThreads = Math.max(1, Math.min(32, Number(tuning?.threads) || DEFAULT_MAX_CONCURRENCY));
 
     if (!items.length) {
       return { ok: false, error: "No translatable page text was found." };
     }
 
     const uniqueMap = new Map();
+    let groupIndex = 0;
     for (const item of items) {
       let group = uniqueMap.get(item.core);
       if (!group) {
-        group = { core: item.core, inViewport: false, entries: [] };
+        group = {
+          core: item.core,
+          inViewport: false,
+          priority: item.priority ?? 3,
+          prominence: item.prominence ?? 0,
+          domOrder: groupIndex++,
+          entries: []
+        };
         uniqueMap.set(item.core, group);
       }
       group.entries.push(item);
-      if (!group.inViewport && item.inViewport) {
+      const itemP = item.priority ?? 3;
+      if (itemP < group.priority) {
+        group.priority = itemP;
+      }
+      if (group.priority === 1) {
         group.inViewport = true;
+      }
+      const itemProm = item.prominence ?? 0;
+      if (itemProm > group.prominence) {
+        group.prominence = itemProm;
       }
     }
 
@@ -552,147 +853,188 @@
       return { ok: false, error: "No translatable page text was found." };
     }
 
-    const groups = Array.from(uniqueMap.values()).sort(
-      (a, b) => (b.inViewport ? 1 : 0) - (a.inViewport ? 1 : 0)
-    );
+    const allGroups = Array.from(uniqueMap.values());
+    const totalUniqueCount = allGroups.length;
 
-    const batches = [];
-    for (let offset = 0; offset < groups.length; offset += activeBatchSize) {
-      batches.push(groups.slice(offset, offset + activeBatchSize));
-    }
-
-    let nextBatchIndex = 0;
     let completedUnique = 0;
     let updatedNodesCount = 0;
     let firstError = null;
-
     const signal = state.abortController?.signal;
 
-    async function processBatches() {
-      while (!signal?.aborted && !firstError) {
-        const batchIndex = nextBatchIndex++;
-        if (batchIndex >= batches.length) return;
-        const batch = batches[batchIndex];
+    function applyBatchTranslations(batch, translations) {
+      state.isApplyingTranslation = true;
+      let batchNodeCount = 0;
 
-        try {
-          const result = await chrome.runtime.sendMessage({
-            action: "translateBatch",
-            texts: batch.map((group) => group.core),
-            format: "html"
-          });
+      try {
+        batch.forEach((group, index) => {
+          const translated = translations[index];
+          if (typeof translated !== "string") return;
 
-          if (signal?.aborted) return;
+          for (const entry of group.entries) {
+            if (signal?.aborted) return;
 
-          if (!result?.ok) {
-            firstError ||= result?.error || "Translation request failed.";
-            return;
-          }
-
-          if (!Array.isArray(result.translations) || result.translations.length !== batch.length) {
-            firstError ||= "Server returned a count mismatch in translations.";
-            return;
-          }
-
-          state.isApplyingTranslation = true;
-          let batchNodeCount = 0;
-
-          try {
-            batch.forEach((group, index) => {
-              const translated = result.translations[index];
-              if (typeof translated !== "string") return;
-
-              for (const entry of group.entries) {
-                if (signal?.aborted) return;
-
-                if (entry.type === "text") {
-                  if (entry.node.isConnected) {
-                    state.originals.set(entry.node, entry.original);
-                    markSubtreeProcessed(entry.node);
-                    entry.node.nodeValue = `${entry.leading}${decodeHtmlEntities(translated)}${entry.trailing}`;
-                    batchNodeCount++;
-                  }
-                } else if (entry.type === "attribute") {
-                  if (entry.element.isConnected) {
-                    const attrKey = {
-                      type: "attribute",
-                      element: entry.element,
-                      attribute: entry.attribute
-                    };
-                    state.originals.set(attrKey, entry.original);
-                    let attrSet = state.processedAttributes.get(entry.element);
-                    if (!attrSet) {
-                      attrSet = new Set();
-                      state.processedAttributes.set(entry.element, attrSet);
-                    }
-                    attrSet.add(entry.attribute);
-
-                    const translatedVal = `${entry.leading}${decodeHtmlEntities(translated)}${entry.trailing}`;
-                    entry.element.setAttribute(entry.attribute, translatedVal);
-                    if (entry.attribute === "placeholder" && "placeholder" in entry.element) {
-                      entry.element.placeholder = translatedVal;
-                    }
-                    batchNodeCount++;
-                  }
-                } else if (entry.type === "segment") {
-                  if (entry.parent.isConnected) {
-                    const translatedSentence = `${entry.leading}${translated}${entry.trailing}`;
-                    const doc = entry.parent.ownerDocument || document;
-                    const reconstructedNodes = parseTranslatedMarkup(
-                      translatedSentence,
-                      entry.elementMap,
-                      doc
-                    );
-
-                    const segKey = {
-                      type: "segment",
-                      parent: entry.parent,
-                      originalNodes: entry.nodes,
-                      originalTextMap: entry.originalTextMap,
-                      originalChildrenMap: entry.originalChildrenMap,
-                      currentNodes: reconstructedNodes
-                    };
-                    state.originals.set(segKey, entry.originalText);
-                    for (const n of entry.nodes) markSubtreeProcessed(n);
-                    for (const n of reconstructedNodes) markSubtreeProcessed(n);
-
-                    replaceSegmentNodes(entry.parent, entry.nodes, reconstructedNodes);
-                    batchNodeCount++;
-                  }
-                }
+            if (entry.type === "text") {
+              if (entry.node.isConnected) {
+                state.originals.set(entry.node, entry.original);
+                markSubtreeProcessed(entry.node);
+                entry.node.nodeValue = `${entry.leading}${decodeHtmlEntities(translated)}${entry.trailing}`;
+                batchNodeCount++;
               }
-            });
-          } finally {
-            if (mutationObserver && typeof mutationObserver.takeRecords === "function") {
-              mutationObserver.takeRecords();
+            } else if (entry.type === "attribute") {
+              if (entry.element.isConnected) {
+                const attrKey = {
+                  type: "attribute",
+                  element: entry.element,
+                  attribute: entry.attribute
+                };
+                state.originals.set(attrKey, entry.original);
+                let attrSet = state.processedAttributes.get(entry.element);
+                if (!attrSet) {
+                  attrSet = new Set();
+                  state.processedAttributes.set(entry.element, attrSet);
+                }
+                attrSet.add(entry.attribute);
+
+                const translatedVal = `${entry.leading}${decodeHtmlEntities(translated)}${entry.trailing}`;
+                entry.element.setAttribute(entry.attribute, translatedVal);
+                if (entry.attribute === "placeholder" && "placeholder" in entry.element) {
+                  entry.element.placeholder = translatedVal;
+                }
+                batchNodeCount++;
+              }
+            } else if (entry.type === "segment") {
+              if (entry.parent.isConnected) {
+                const translatedSentence = `${entry.leading}${translated}${entry.trailing}`;
+                const doc = entry.parent.ownerDocument || (typeof document !== "undefined" ? document : null);
+                const reconstructedNodes = parseTranslatedMarkup(
+                  translatedSentence,
+                  entry.elementMap,
+                  doc
+                );
+
+                const segKey = {
+                  type: "segment",
+                  parent: entry.parent,
+                  originalNodes: entry.nodes,
+                  originalTextMap: entry.originalTextMap,
+                  originalChildrenMap: entry.originalChildrenMap,
+                  currentNodes: reconstructedNodes
+                };
+                state.originals.set(segKey, entry.originalText);
+                for (const n of entry.nodes) markSubtreeProcessed(n);
+                for (const n of reconstructedNodes) markSubtreeProcessed(n);
+
+                replaceSegmentNodes(entry.parent, entry.nodes, reconstructedNodes);
+                batchNodeCount++;
+              }
             }
-            state.isApplyingTranslation = false;
           }
-
-          updatedNodesCount += batchNodeCount;
-          completedUnique += batch.length;
-
-          if (!isDynamic) {
-            reportProgress(
-              Math.min(completedUnique, groups.length),
-              groups.length,
-              updatedNodesCount,
-              items.length
-            );
-          }
-
-          if (!batch[0]?.inViewport && !signal?.aborted) {
-            await new Promise((resolve) => runIdle(resolve));
-          }
-        } catch (error) {
-          if (signal?.aborted) return;
-          firstError ||= error?.message || String(error);
-          return;
+        });
+      } finally {
+        if (mutationObserver && typeof mutationObserver.takeRecords === "function") {
+          mutationObserver.takeRecords();
         }
+        state.isApplyingTranslation = false;
+      }
+
+      return batchNodeCount;
+    }
+
+    async function executeBatch(batch) {
+      if (!batch || batch.length === 0 || signal?.aborted || firstError) return false;
+
+      try {
+        const result = await chrome.runtime.sendMessage({
+          action: "translateBatch",
+          texts: batch.map((group) => group.core),
+          format: "html"
+        });
+
+        if (signal?.aborted) return false;
+
+        if (!result?.ok) {
+          firstError ||= result?.error || "Translation request failed.";
+          return false;
+        }
+
+        if (!Array.isArray(result.translations) || result.translations.length !== batch.length) {
+          firstError ||= "Server returned a count mismatch in translations.";
+          return false;
+        }
+
+        const batchNodes = applyBatchTranslations(batch, result.translations);
+        updatedNodesCount += batchNodes;
+        completedUnique += batch.length;
+
+        if (!isDynamic) {
+          reportProgress(
+            Math.min(completedUnique, totalUniqueCount),
+            totalUniqueCount,
+            updatedNodesCount,
+            items.length
+          );
+        }
+
+        return true;
+      } catch (error) {
+        if (signal?.aborted) return false;
+        firstError ||= error?.message || String(error);
+        return false;
       }
     }
 
-    const workerCount = Math.min(activeThreads, batches.length);
-    await Promise.all(Array.from({ length: workerCount }, () => processBatches()));
+    // --- Step 1: Micro "Hero" First Batch (Standalone, Concurrency = 1) ---
+    const { heroBatch, remainingGroups } = extractHeroBatch(
+      allGroups,
+      Math.min(8, activeBatchSize)
+    );
+
+    if (heroBatch.length > 0) {
+      await executeBatch(heroBatch);
+      if (signal?.aborted) {
+        return { ok: false, aborted: true, error: "Translation was cancelled." };
+      }
+      if (firstError) {
+        return {
+          ok: false,
+          partial: updatedNodesCount > 0,
+          error: firstError,
+          translatedCount: updatedNodesCount,
+          total: items.length
+        };
+      }
+      if (typeof requestAnimationFrame === "function") {
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+    }
+
+    // --- Step 2 & 3: Staged Concurrency & Dynamic Scroll Priority Queue ---
+    if (remainingGroups.length > 0 && !signal?.aborted && !firstError) {
+      const queue = new ActivePriorityQueue(remainingGroups, { signal });
+      queue.attachListeners();
+
+      try {
+        const workerCount = Math.min(activeThreads, Math.max(1, Math.ceil(remainingGroups.length / activeBatchSize)));
+
+        async function workerLoop() {
+          while (!signal?.aborted && !firstError && queue.hasPending()) {
+            const batch = queue.dequeueBatch(activeBatchSize);
+            if (!batch || batch.length === 0) break;
+
+            const success = await executeBatch(batch);
+            if (!success) break;
+
+            if (batch[0]?.priority === 3 && !signal?.aborted) {
+              await new Promise((resolve) => runIdle(resolve));
+            }
+          }
+        }
+
+        await Promise.all(Array.from({ length: workerCount }, () => workerLoop()));
+      } finally {
+        queue.detachListeners();
+      }
+    }
 
     if (signal?.aborted) {
       return { ok: false, aborted: true, error: "Translation was cancelled." };
@@ -711,15 +1053,15 @@
     const resultStats = {
       ok: true,
       translatedCount: updatedNodesCount,
-      uniqueCount: groups.length,
+      uniqueCount: totalUniqueCount,
       totalNodes: items.length,
-      savedByDedup: Math.max(0, updatedNodesCount - groups.length)
+      savedByDedup: Math.max(0, updatedNodesCount - totalUniqueCount)
     };
     if (isDynamic && state.lastStats) {
       state.lastStats.translatedCount += updatedNodesCount;
-      state.lastStats.uniqueCount += groups.length;
+      state.lastStats.uniqueCount += totalUniqueCount;
       state.lastStats.totalNodes += items.length;
-      state.lastStats.savedByDedup += Math.max(0, updatedNodesCount - groups.length);
+      state.lastStats.savedByDedup += Math.max(0, updatedNodesCount - totalUniqueCount);
     } else {
       state.lastStats = resultStats;
     }
@@ -984,6 +1326,15 @@
     translateItems,
     translatePage,
     restoreOriginals,
+    getNodePriority,
+    isNodeInViewport,
+    getElementProminence,
+    extractHeroBatch,
+    ActivePriorityQueue,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MAX_CONCURRENCY,
+    BATCH_SIZE,
+    MAX_CONCURRENT_BATCHES,
     state,
     SKIP_TAGS,
     INLINE_TAGS,

@@ -99,8 +99,8 @@
           <label for="setting-threads" class="setting-label">CPU Worker Threads</label>
           <div class="select-wrapper">
             <select id="setting-threads" class="setting-select">
-              <option value="2">2 Cores</option>
-              <option value="4" selected>4 Cores</option>
+              <option value="2" selected>2 Cores (Staged)</option>
+              <option value="4">4 Cores</option>
               <option value="8">8 Cores</option>
               <option value="16">16 Cores</option>
             </select>
@@ -111,8 +111,9 @@
           <label for="setting-batch-limit" class="setting-label">Batch Limit</label>
           <div class="select-wrapper">
             <select id="setting-batch-limit" class="setting-select">
+              <option value="20" selected>20 (Progressive)</option>
               <option value="25">25 (Eco)</option>
-              <option value="40" selected>40 (Default)</option>
+              <option value="40">40 (Standard)</option>
               <option value="100">100 (Optimized)</option>
               <option value="150">150 (Fastest)</option>
             </select>
@@ -128,7 +129,7 @@
         </div>
         <div class="tuning-detail">
           <span class="tuning-detail-label">Config:</span>
-          <code class="tuning-code" id="tuning-config-code">--threads 4 --batch-limit 40</code>
+          <code class="tuning-code" id="tuning-config-code">--threads 2 --batch-limit 20</code>
         </div>
         <div class="tuning-detail">
           <span class="tuning-detail-label">Memory:</span>

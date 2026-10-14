@@ -1839,3 +1839,435 @@ test("End-to-End: handleContextMenuClick dispatches to content.js onMessage and 
   }
 });
 
+test("3-Tier Priority Assignment: getNodePriority accurately categorizes active viewport, prefetch buffer, and deep document", () => {
+  const winHeight = 1000;
+  const winWidth = 1000;
+
+  // Priority 1: In active viewport
+  const elVp = new MockDOMNode(1, "DIV");
+  elVp.getBoundingClientRect = () => ({ top: 100, bottom: 250, left: 10, right: 800, width: 790, height: 150 });
+  assert.equal(core.getNodePriority(elVp, winHeight, winWidth), 1);
+  assert.equal(core.isNodeInViewport(elVp), true);
+
+  // Priority 1: Straddling top edge of viewport (partially visible)
+  const elStraddleTop = new MockDOMNode(1, "DIV");
+  elStraddleTop.getBoundingClientRect = () => ({ top: -50, bottom: 100, left: 0, right: 800, width: 800, height: 150 });
+  assert.equal(core.getNodePriority(elStraddleTop, winHeight, winWidth), 1);
+
+  // Priority 1: Straddling bottom edge of viewport (partially visible)
+  const elStraddleBottom = new MockDOMNode(1, "DIV");
+  elStraddleBottom.getBoundingClientRect = () => ({ top: 950, bottom: 1100, left: 0, right: 800, width: 800, height: 150 });
+  assert.equal(core.getNodePriority(elStraddleBottom, winHeight, winWidth), 1);
+
+  // Priority 2: In prefetch buffer (within 1 screen height below viewport: 1000px to 2000px)
+  const elPrefetch = new MockDOMNode(1, "DIV");
+  elPrefetch.getBoundingClientRect = () => ({ top: 1100, bottom: 1300, left: 10, right: 800, width: 790, height: 200 });
+  assert.equal(core.getNodePriority(elPrefetch, winHeight, winWidth), 2);
+  assert.equal(core.isNodeInViewport(elPrefetch), false);
+
+  // Priority 3: Deep document (> 1 screen height below viewport, e.g. top: 2200)
+  const elDeep = new MockDOMNode(1, "DIV");
+  elDeep.getBoundingClientRect = () => ({ top: 2200, bottom: 2400, left: 10, right: 800, width: 790, height: 200 });
+  assert.equal(core.getNodePriority(elDeep, winHeight, winWidth), 3);
+
+  // Priority 3: Scrolled past (above viewport, e.g. bottom <= 0)
+  const elPast = new MockDOMNode(1, "DIV");
+  elPast.getBoundingClientRect = () => ({ top: -500, bottom: -100, left: 10, right: 800, width: 790, height: 400 });
+  assert.equal(core.getNodePriority(elPast, winHeight, winWidth), 3);
+
+  // Text node inherits parent's bounding rect
+  const parent = new MockDOMNode(1, "P");
+  parent.getBoundingClientRect = () => ({ top: 1500, bottom: 1600, left: 0, right: 500, width: 500, height: 100 });
+  const textChild = new MockDOMNode(3, "#text", "Child text");
+  parent.appendChild(textChild);
+  assert.equal(core.getNodePriority(textChild, winHeight, winWidth), 2);
+});
+
+test("Prominence Scoring: getElementProminence prioritizes headings, title, nav, and top position", () => {
+  // Headings hierarchy
+  const h1 = new MockDOMNode(1, "H1");
+  const h2 = new MockDOMNode(1, "H2");
+  const h3 = new MockDOMNode(1, "H3");
+  const h6 = new MockDOMNode(1, "H6");
+  const nav = new MockDOMNode(1, "NAV");
+  const p = new MockDOMNode(1, "P");
+  const div = new MockDOMNode(1, "DIV");
+
+  const scoreH1 = core.getElementProminence(h1);
+  const scoreH2 = core.getElementProminence(h2);
+  const scoreH3 = core.getElementProminence(h3);
+  const scoreH6 = core.getElementProminence(h6);
+  const scoreNav = core.getElementProminence(nav);
+  const scoreP = core.getElementProminence(p);
+  const scoreDiv = core.getElementProminence(div);
+
+  assert.ok(scoreH1 > scoreH2, "H1 > H2");
+  assert.ok(scoreH2 > scoreH3, "H2 > H3");
+  assert.ok(scoreH3 > scoreH6, "H3 > H6");
+  assert.ok(scoreH1 > scoreNav, "H1 > NAV");
+  assert.ok(scoreNav > scoreP, "NAV > P");
+  assert.ok(scoreP > scoreDiv, "P > DIV");
+
+  // Position bonus for elements near the top of viewport
+  const topEl = new MockDOMNode(1, "H1");
+  topEl.getBoundingClientRect = () => ({ top: 40, bottom: 90, left: 0, right: 500 });
+  const lowerEl = new MockDOMNode(1, "H1");
+  lowerEl.getBoundingClientRect = () => ({ top: 800, bottom: 850, left: 0, right: 500 });
+
+  assert.ok(core.getElementProminence(topEl) > core.getElementProminence(lowerEl), "Topmost element has position bonus");
+});
+
+test("Micro 'Hero' First Batch: extractHeroBatch isolates top 5-8 prominent viewport items", () => {
+  // Create 15 groups with varying priority and prominence
+  const groups = [
+    { core: "footer_copy", priority: 3, prominence: 20, domOrder: 14, entries: [] },
+    { core: "below_fold_h2", priority: 2, prominence: 90, domOrder: 9, entries: [] },
+    { core: "vp_nav_home", priority: 1, prominence: 85, domOrder: 1, entries: [] },
+    { core: "vp_h1_title", priority: 1, prominence: 120, domOrder: 2, entries: [] },
+    { core: "vp_h2_sub", priority: 1, prominence: 105, domOrder: 3, entries: [] },
+    { core: "vp_nav_about", priority: 1, prominence: 84, domOrder: 4, entries: [] },
+    { core: "vp_p_lead", priority: 1, prominence: 55, domOrder: 5, entries: [] },
+    { core: "vp_p_body1", priority: 1, prominence: 45, domOrder: 6, entries: [] },
+    { core: "vp_p_body2", priority: 1, prominence: 44, domOrder: 7, entries: [] },
+    { core: "vp_p_body3", priority: 1, prominence: 42, domOrder: 8, entries: [] },
+    { core: "vp_div_minor1", priority: 1, prominence: 25, domOrder: 10, entries: [] },
+    { core: "vp_div_minor2", priority: 1, prominence: 24, domOrder: 11, entries: [] },
+    { core: "deep_doc_text", priority: 3, prominence: 20, domOrder: 12, entries: [] },
+    { core: "deep_doc_p", priority: 3, prominence: 40, domOrder: 13, entries: [] }
+  ];
+
+  const { heroBatch, remainingGroups } = core.extractHeroBatch(groups, 8);
+
+  // Max 8 hero items isolated
+  assert.equal(heroBatch.length, 8);
+
+  // All hero items must be Priority 1
+  for (const item of heroBatch) {
+    assert.equal(item.priority, 1);
+  }
+
+  // Hero batch must be ordered by prominence descending
+  assert.equal(heroBatch[0].core, "vp_h1_title"); // 120
+  assert.equal(heroBatch[1].core, "vp_h2_sub");   // 105
+  assert.equal(heroBatch[2].core, "vp_nav_home"); // 85
+  assert.equal(heroBatch[3].core, "vp_nav_about");// 84
+
+  // Remaining groups must contain the leftover Priority 1 items and all Priority 2 and 3 items
+  assert.equal(remainingGroups.length, groups.length - 8);
+  const remainingCores = remainingGroups.map((g) => g.core);
+  assert.ok(remainingCores.includes("vp_div_minor1"));
+  assert.ok(remainingCores.includes("vp_div_minor2"));
+  assert.ok(remainingCores.includes("below_fold_h2"));
+  assert.ok(remainingCores.includes("footer_copy"));
+
+  // Edge Case: 3 viewport items (fewer than 5) -> returns all 3
+  const fewGroups = [
+    { core: "h1", priority: 1, prominence: 100, domOrder: 0, entries: [] },
+    { core: "p", priority: 1, prominence: 40, domOrder: 1, entries: [] },
+    { core: "div", priority: 1, prominence: 20, domOrder: 2, entries: [] },
+    { core: "deep", priority: 3, prominence: 20, domOrder: 3, entries: [] }
+  ];
+  const fewRes = core.extractHeroBatch(fewGroups, 8);
+  assert.equal(fewRes.heroBatch.length, 3);
+  assert.equal(fewRes.remainingGroups.length, 1);
+
+  // Edge Case: 0 viewport items -> returns empty hero batch, all in remaining
+  const zeroVp = [
+    { core: "item1", priority: 2, prominence: 40, domOrder: 0, entries: [] },
+    { core: "item2", priority: 3, prominence: 20, domOrder: 1, entries: [] }
+  ];
+  const zeroRes = core.extractHeroBatch(zeroVp, 8);
+  assert.equal(zeroRes.heroBatch.length, 0);
+  assert.equal(zeroRes.remainingGroups.length, 2);
+});
+
+test("Scroll Reprioritization: ActivePriorityQueue dynamically promotes newly visible elements to Priority 1 upon scroll", () => {
+  // Construct mock elements
+  const el1 = new MockDOMNode(1, "DIV");
+  el1.getBoundingClientRect = () => ({ top: 50, bottom: 150, left: 0, right: 500, width: 500, height: 100 });
+  const g1 = { core: "viewport_item", priority: 1, prominence: 80, domOrder: 0, entries: [{ element: el1 }] };
+
+  const el2 = new MockDOMNode(1, "DIV");
+  el2.getBoundingClientRect = () => ({ top: 1200, bottom: 1300, left: 0, right: 500, width: 500, height: 100 });
+  const g2 = { core: "prefetch_item", priority: 2, prominence: 50, domOrder: 1, entries: [{ element: el2 }] };
+
+  const el3 = new MockDOMNode(1, "DIV");
+  el3.getBoundingClientRect = () => ({ top: 3000, bottom: 3100, left: 0, right: 500, width: 500, height: 100 });
+  const g3 = { core: "deep_item", priority: 3, prominence: 40, domOrder: 2, entries: [{ element: el3 }] };
+
+  const queue = new core.ActivePriorityQueue([g1, g2, g3]);
+
+  // Initial order: g1 (P1), g2 (P2), g3 (P3)
+  assert.equal(queue.pending[0].core, "viewport_item");
+  assert.equal(queue.pending[1].core, "prefetch_item");
+  assert.equal(queue.pending[2].core, "deep_item");
+
+  // User scrolls down 2800px: el3 now enters the active viewport (top: 200, bottom: 300)
+  el3.getBoundingClientRect = () => ({ top: 200, bottom: 300, left: 0, right: 500, width: 500, height: 100 });
+  // el1 scrolled out above (top: -2750, bottom: -2650)
+  el1.getBoundingClientRect = () => ({ top: -2750, bottom: -2650, left: 0, right: 500, width: 500, height: 100 });
+
+  queue.reprioritize();
+
+  // g3 is now Priority 1 and jumps ahead of g1 and g2!
+  assert.equal(g3.priority, 1);
+  assert.equal(g1.priority, 3);
+  assert.equal(queue.pending[0].core, "deep_item");
+
+  // Dequeuing returns the newly visible item first!
+  const batch = queue.dequeueBatch(1);
+  assert.equal(batch.length, 1);
+  assert.equal(batch[0].core, "deep_item");
+  assert.equal(queue.length, 2);
+
+  // Cleanup listeners
+  queue.detachListeners();
+});
+
+test("Staged Concurrency: translateItems dispatches hero batch standalone and limits off-hero concurrency to 2", async () => {
+  const root = new MockDOMNode(1, "DIV");
+  root.isRoot = true;
+
+  // Create 30 paragraphs (10 in viewport, 10 in prefetch, 10 in deep document)
+  const paragraphs = [];
+  for (let i = 0; i < 30; i++) {
+    const p = new MockDOMNode(1, "P");
+    const top = i < 10 ? 50 + i * 40 : (i < 20 ? 1100 + (i - 10) * 40 : 2500 + (i - 20) * 40);
+    p.getBoundingClientRect = () => ({ top, bottom: top + 30, left: 0, right: 600, width: 600, height: 30 });
+    const textNode = new MockDOMNode(3, "#text", `Sentence number ${i} for concurrency test`);
+    p.appendChild(textNode);
+    root.appendChild(p);
+    paragraphs.push({ p, textNode });
+  }
+
+  const items = core.collectTranslatableItems(root);
+  assert.equal(items.length, 30);
+
+  // Monitor concurrency and batch sizes
+  let activeConcurrency = 0;
+  let maxObservedConcurrency = 0;
+  let batchIndex = 0;
+  const batchLog = [];
+
+  const originalSendMessage = globalThis.chrome.runtime.sendMessage;
+  globalThis.chrome.runtime.sendMessage = async (msg) => {
+    if (msg.action === "translateBatch") {
+      activeConcurrency++;
+      if (activeConcurrency > maxObservedConcurrency) {
+        maxObservedConcurrency = activeConcurrency;
+      }
+
+      const currentBatchNum = ++batchIndex;
+      const currentSize = msg.texts.length;
+      const isHero = currentBatchNum === 1;
+
+      batchLog.push({
+        batchNum: currentBatchNum,
+        size: currentSize,
+        concurrency: activeConcurrency,
+        isHero
+      });
+
+      // Small async delay to simulate inference time and test concurrency overlap
+      await new Promise((r) => setTimeout(r, 20));
+
+      activeConcurrency--;
+      return {
+        ok: true,
+        translations: msg.texts.map((t) => `EN:${t}`)
+      };
+    }
+    return { ok: true };
+  };
+
+  try {
+    core.state.busy = false;
+    core.state.originals.clear();
+
+    const result = await core.translateItems(items);
+    assert.equal(result.ok, true);
+    assert.equal(result.translatedCount, 30);
+
+    // 1. Verify Hero Batch: First batch must be 5-8 items (isolated prominent viewport items)
+    assert.ok(batchLog.length >= 2, "Expected multiple batches");
+    const heroBatch = batchLog[0];
+    assert.equal(heroBatch.isHero, true);
+    assert.ok(heroBatch.size >= 5 && heroBatch.size <= 8, `Hero batch size expected 5-8, got ${heroBatch.size}`);
+    assert.equal(heroBatch.concurrency, 1, "Hero batch must be dispatched standalone with concurrency = 1");
+
+    // 2. Verify Staged Concurrency: Max concurrent requests must never exceed 2
+    assert.ok(maxObservedConcurrency <= 2, `Expected max concurrency <= 2, observed ${maxObservedConcurrency}`);
+
+    // 3. Verify DOM was updated
+    assert.ok(paragraphs[0].textNode.nodeValue.startsWith("EN:"));
+    assert.ok(paragraphs[29].textNode.nodeValue.startsWith("EN:"));
+
+    // 4. Verify clean restoration
+    await core.restoreOriginals();
+    assert.equal(paragraphs[0].textNode.nodeValue, "Sentence number 0 for concurrency test");
+    assert.equal(paragraphs[29].textNode.nodeValue, "Sentence number 29 for concurrency test");
+  } finally {
+    globalThis.chrome.runtime.sendMessage = originalSendMessage;
+  }
+});
+
+test("Progressive Rendering: DOM nodes are updated immediately per batch without waiting for other in-flight batches", async () => {
+  const root = new MockDOMNode(1, "DIV");
+  root.isRoot = true;
+
+  const p1 = new MockDOMNode(1, "H1");
+  p1.getBoundingClientRect = () => ({ top: 10, bottom: 60, left: 0, right: 500, width: 500, height: 50 });
+  const t1 = new MockDOMNode(3, "#text", "Hero Main Heading");
+  p1.appendChild(t1);
+
+  const p2 = new MockDOMNode(1, "P");
+  p2.getBoundingClientRect = () => ({ top: 1500, bottom: 1600, left: 0, right: 500, width: 500, height: 100 });
+  const t2 = new MockDOMNode(3, "#text", "Second Batch Content");
+  p2.appendChild(t2);
+
+  root.appendChild(p1);
+  root.appendChild(p2);
+
+  const items = core.collectTranslatableItems(root);
+  assert.equal(items.length, 2);
+
+  let batchCount = 0;
+  let heroRenderedBeforeBatch2Finished = false;
+
+  const originalSendMessage = globalThis.chrome.runtime.sendMessage;
+  globalThis.chrome.runtime.sendMessage = async (msg) => {
+    if (msg.action === "translateBatch") {
+      batchCount++;
+      if (batchCount === 1) {
+        // Hero batch
+        return { ok: true, translations: msg.texts.map((t) => `HERO:${t}`) };
+      }
+      if (batchCount === 2) {
+        // When batch 2 runs, verify batch 1 has ALREADY updated the DOM!
+        if (t1.nodeValue === "HERO:Hero Main Heading") {
+          heroRenderedBeforeBatch2Finished = true;
+        }
+        return { ok: true, translations: msg.texts.map((t) => `BATCH2:${t}`) };
+      }
+    }
+    return { ok: true };
+  };
+
+  try {
+    core.state.busy = false;
+    core.state.originals.clear();
+
+    const res = await core.translateItems(items, { settings: { batchSize: 1 } });
+    assert.equal(res.ok, true);
+    assert.equal(heroRenderedBeforeBatch2Finished, true, "Hero batch must update DOM immediately before batch 2 completes");
+    assert.equal(t1.nodeValue, "HERO:Hero Main Heading");
+    assert.equal(t2.nodeValue, "BATCH2:Second Batch Content");
+
+    await core.restoreOriginals();
+    assert.equal(t1.nodeValue, "Hero Main Heading");
+    assert.equal(t2.nodeValue, "Second Batch Content");
+  } finally {
+    globalThis.chrome.runtime.sendMessage = originalSendMessage;
+  }
+});
+
+test("ActivePriorityQueue Resilience: handles detached elements and throwing getBoundingClientRect gracefully", () => {
+  const detachedEl = new MockDOMNode(1, "DIV");
+  detachedEl.getBoundingClientRect = () => { throw new Error("Detached element bounding rect error"); };
+
+  const normalEl = new MockDOMNode(1, "DIV");
+  normalEl.getBoundingClientRect = () => ({ top: 100, bottom: 200, left: 0, right: 400, width: 400, height: 100 });
+
+  const gDetached = { core: "detached", priority: 3, prominence: 10, domOrder: 0, entries: [{ element: detachedEl }] };
+  const gNormal = { core: "normal", priority: 2, prominence: 30, domOrder: 1, entries: [{ element: normalEl }] };
+
+  const queue = new core.ActivePriorityQueue([gDetached, gNormal]);
+  assert.equal(queue.hasPending(), true);
+
+  // Reprioritize should not throw even if an element throws
+  assert.doesNotThrow(() => {
+    queue.reprioritize();
+  });
+
+  // Normal element correctly identified
+  assert.equal(gNormal.priority, 1);
+  // Detached element safely defaulted to Priority 3
+  assert.equal(gDetached.priority, 3);
+
+  // Dequeuing works as expected
+  const b1 = queue.dequeueBatch(1);
+  assert.equal(b1[0].core, "normal");
+  const b2 = queue.dequeueBatch(1);
+  assert.equal(b2[0].core, "detached");
+  assert.equal(queue.hasPending(), false);
+
+  // Empty queue dequeue
+  const emptyBatch = queue.dequeueBatch(5);
+  assert.deepEqual(emptyBatch, []);
+
+  queue.detachListeners();
+});
+
+test("Partial Cancellation: aborting after hero batch leaves translated nodes restorable without DOM corruption", async () => {
+  const root = new MockDOMNode(1, "DIV");
+  root.isRoot = true;
+
+  const h1 = new MockDOMNode(1, "H1");
+  h1.getBoundingClientRect = () => ({ top: 10, bottom: 50, left: 0, right: 500, width: 500, height: 40 });
+  const tHero = new MockDOMNode(3, "#text", "Page Header Title");
+  h1.appendChild(tHero);
+
+  const pDeep = new MockDOMNode(1, "P");
+  pDeep.getBoundingClientRect = () => ({ top: 3000, bottom: 3100, left: 0, right: 500, width: 500, height: 100 });
+  const tDeep = new MockDOMNode(3, "#text", "Offscreen Paragraph");
+  pDeep.appendChild(tDeep);
+
+  root.appendChild(h1);
+  root.appendChild(pDeep);
+
+  const items = core.collectTranslatableItems(root);
+
+  const originalSendMessage = globalThis.chrome.runtime.sendMessage;
+  let batchNum = 0;
+
+  globalThis.chrome.runtime.sendMessage = async (msg) => {
+    if (msg.action === "translateBatch") {
+      batchNum++;
+      if (batchNum === 1) {
+        return { ok: true, translations: ["EN:Page Header Title"] };
+      }
+      // Simulate user navigating away or clicking restore while second batch is pending
+      core.state.abortController?.abort();
+      return { ok: true, translations: ["EN:Offscreen Paragraph"] };
+    }
+    return { ok: true };
+  };
+
+  try {
+    core.state.busy = true;
+    core.state.abortController = new AbortController();
+    core.state.originals.clear();
+
+    const res = await core.translateItems(items, { settings: { batchSize: 1 } });
+    assert.equal(res.ok, false);
+    assert.equal(res.aborted, true);
+
+    // Hero item was translated before cancellation
+    assert.equal(tHero.nodeValue, "EN:Page Header Title");
+    // Deep item was not translated due to abort
+    assert.equal(tDeep.nodeValue, "Offscreen Paragraph");
+
+    // Clean restore works perfectly
+    await core.restoreOriginals();
+    assert.equal(tHero.nodeValue, "Page Header Title");
+    assert.equal(tDeep.nodeValue, "Offscreen Paragraph");
+    assert.equal(core.state.originals.size, 0);
+  } finally {
+    globalThis.chrome.runtime.sendMessage = originalSendMessage;
+    core.state.busy = false;
+    core.state.abortController = null;
+  }
+});
+
+
+

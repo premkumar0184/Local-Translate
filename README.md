@@ -449,10 +449,10 @@ If your machine is not connected to the internet:
 Libre Local Translator includes a built-in **Hardware Acceleration & Tuning Settings Menu** right inside the extension popup:
 1. Click the **gear icon (⚙)** in the popup header to open the Hardware & Tuning panel.
 2. Select your configuration or tune individual hardware controls:
-   - **Preset Profiles**: CPU Standard (4 Cores · Batch 40), CPU Multi-Core (--threads 8 · Batch 100), NVIDIA GPU (Docker: --gpus all), NVIDIA GPU (Python / PyTorch CUDA), Low Memory Mode (~1.5 GB RAM), or Custom Configuration.
+   - **Preset Profiles**: CPU Standard (2 Cores · Batch 20 Progressive), CPU Multi-Core (--threads 8 · Batch 100), NVIDIA GPU (Docker: --gpus all), NVIDIA GPU (Python / PyTorch CUDA), Low Memory Mode (~1.5 GB RAM), or Custom Configuration.
    - **Hardware Acceleration Mode**: Select between CPU (Multi-threaded), NVIDIA GPU (Docker: `docker run --gpus all ...`), or NVIDIA GPU (Python: CUDA-enabled PyTorch in venv).
    - **CPU Worker Threads**: Select 2, 4, 8, or 16 CPU cores to match your hardware concurrency.
-   - **Batch Limit**: Choose matrix batching limits (25, 40, 100, 150) to optimize CTranslate2 throughput.
+   - **Batch Limit**: Choose matrix batching limits (20, 25, 40, 100, 150) to optimize CTranslate2 throughput and progressive rendering.
    - **Memory Allocation**: Configure Standard (~1.5 GB + ~200 MB/model), Low RAM (~1.5 GB for <= 8 GB RAM machines), or Dedicated High Memory.
 3. The dynamic preview card updates in real-time, showing expected impact and CLI/Docker launch commands.
 4. Settings auto-save instantly to extension storage (`chrome.storage.local`) and calibrate all page translation batches.

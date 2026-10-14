@@ -38,8 +38,8 @@ const PRESETS = {
   "cpu-default": {
     name: "CPU Standard",
     mode: "cpu",
-    threads: 4,
-    batchSize: 40,
+    threads: 2,
+    batchSize: 20,
     memory: "standard"
   },
   "cpu-tuned": {
@@ -75,8 +75,8 @@ const PRESETS = {
 const DEFAULT_SETTINGS = {
   preset: "cpu-default",
   mode: "cpu",
-  threads: 4,
-  batchSize: 40,
+  threads: 2,
+  batchSize: 20,
   memory: "standard"
 };
 
@@ -84,7 +84,7 @@ let currentSettings = { ...DEFAULT_SETTINGS };
 let saveTimeout = null;
 
 function updateTuningCard() {
-  const { mode = "cpu", threads = 4, batchSize = 40, memory = "standard" } = currentSettings;
+  const { mode = "cpu", threads = 2, batchSize = 20, memory = "standard" } = currentSettings;
 
   let badge = "Tuned";
   let impact = "Balanced CPU performance for standard browsing.";
